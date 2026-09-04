@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deliberate Delegate"
+  short_description: "Human-gated multi-agent planning and delegation"
+  default_prompt: "Use $deliberate-delegate to prepare a reviewed Phase plan and wait for my direct authorization before execution."
