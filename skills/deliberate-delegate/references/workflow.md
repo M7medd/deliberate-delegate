@@ -41,7 +41,7 @@ This document defines the 12 lifecycle rules, operational boundaries, and stop g
 
 ## 5. Pre-Step Deliberation
 
-- Prior to every Step, Planning Lead and Planner 2 examine all current workspace evidence, test outputs, and requirements.
+- Prior to every Step, Planning Lead and Planner 2 examine current evidence, test outputs, and requirements relevant to that Step. Keep governing rules and active references available; do not reload the entire archive by default.
 - For decisions that can materially change architecture, safety, or scope, Planning Lead first sends the shared evidence and question without its final recommendation. Planner 2 records an independent first-pass position before the Lead presents its own. Routine implementation details do not require this extra round.
 - Both planners debate the technical approach, edge cases, verification requirements, and file scope.
 - When both planners explicitly agree, the Planning Lead writes an immutable versioned brief (`brief.v1.md`) conforming to [the Brief and Result Contract](brief-contract.md) and a pre-debate transcript (`debate.pre.v1.md`). All visible planner messages are preserved verbatim in chronological order without recording private hidden chain-of-thought.
@@ -57,6 +57,11 @@ This document defines the 12 lifecycle rules, operational boundaries, and stop g
 ---
 
 ## 7. Independent Mechanical Verification
+
+The Lead may use the [efficiency helper](efficiency.md) to batch content/status/
+Git identity checks, approved validators and raw log capture. Executor's no-Git
+rule remains intact. Read the summary first, then relevant raw evidence. Missing
+coverage is not proof; neither planner's independent review is replaced.
 
 - The Planning Lead independently inspects raw execution output, full Git status (including modified, staged, unstaged, and untracked files), allowlist compliance, and executes local automated tests and linters.
 - Git status and diffs cover workspace state only. The Executor must declare every outside-root path created or updated during the dispatch; a report claiming `none` is an unverified claim, not evidence.
@@ -74,6 +79,12 @@ This document defines the 12 lifecycle rules, operational boundaries, and stop g
 ---
 
 ## 9. Correction Lifecycle and Limits
+
+Correction review uses parent decision/evidence references, defect IDs, the
+correction diff, affected criteria and regression outputs. Reviewers may expand
+inspection within authorized read scope. Contradictions reopen affected findings;
+narrow corrections need not reread every original source. Full briefs, the exact
+safety capsule, visible debates and both explicit planner approvals remain required.
 
 - If the implementation has correctable defects, omissions, or failing tests, the planners deliberate on the required fixes.
 - The Planning Lead creates a new immutable correction brief version (`brief.v2.md`) conforming to [the Brief and Result Contract](brief-contract.md) and dispatches it to resume the same Executor session.

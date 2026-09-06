@@ -27,6 +27,11 @@ docs/deliberate-delegate/
 
 ## Immutability and Versioning Rules
 
+For new executions, raw adapter/gate output may live in a fresh `raw/attempt-NN/`
+subtree. Preserve existing records and original adapter results unchanged. The
+[efficiency helper](efficiency.md) provides optional generated navigation; load
+relevant evidence on demand, not every transcript and raw log each turn.
+
 1. **Strict Immutability:** Once written and agreed upon, plans, authorizations, briefs, debate transcripts, raw execution results, and decision files must never be edited in place.
 2. **Version Increments:** Any revisions, refinements, or corrections must be written to new versioned files (e.g. `brief.v2.md`, `debate.pre.v2.md`, `result.v2.json`, `decision.v2.md`).
 3. **Full Verbatim Visible Transcripts:** Debate records (`debate.pre.vN.md`, `debate.post.vN.md`) must preserve every visible message exchanged between Planning Lead and Planner 2 verbatim, including role attribution and message sequence. Summaries, paraphrasing, or omissions of visible messages are prohibited. This requirement applies strictly to visible conversation messages; it does not request, capture, or record private hidden reasoning, model scratchpads, or internal chain-of-thought.
@@ -36,7 +41,7 @@ docs/deliberate-delegate/
 
 ## The `state.json` Contract
 
-`state.json` is the sole mutable record in the Phase directory. It tracks progress and active artifact references, but is **not** a source of authority.
+`state.json` is the sole mutable workflow-state record in the Phase directory. It tracks progress and active artifact references, but is **not** a source of authority. An explicitly generated non-authoritative index may also be regenerated; it is a navigation aid, not a workflow record or authorization.
 
 ### Authority and Recovery Invariants
 - Authority derives exclusively from direct human authorization records and recorded immutable artifacts. `state.json` can point to authorization, but cannot create or alter it.

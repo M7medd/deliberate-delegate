@@ -2,7 +2,11 @@
 
 > Human-gated multi-agent coordination layer for dual-planner deliberation and delegated execution.
 
-**Status:** `0.1.0 Public MVP`
+**Status:** `0.2.0 Public MVP`
+
+Version 0.2.0 adds an optional Node 18+ helper for batched mechanical checks,
+adapter waiting and record navigation. Approval policy is unchanged.
+See [usage and limits](skills/deliberate-delegate/references/efficiency.md).
 
 **Repository:** https://github.com/M7medd/deliberate-delegate
 
@@ -39,7 +43,7 @@ Deliberate Delegate is an independent coordination layer built on and requiring 
 - A durable record system with immutable transcripts, versioned briefs, and structured state tracking.
 
 ### This skill IS NOT:
-- An autonomous background daemon or execution runtime binary.
+- An autonomous background daemon or replacement provider execution runtime.
 - A replacement for provider CLIs or upstream `*-delegate` adapters.
 - A fork or vendored copy of upstream relay scripts.
 - An unmonitored agent workflow with automatic cross-phase execution.
@@ -125,7 +129,7 @@ User: I authorize execution of Phase 01 according to docs/deliberate-delegate/ph
 
 ## Deferred, not implemented
 
-The following capabilities are intentionally deferred from the `0.1.0 MVP` and will be considered in future releases:
+The following capabilities remain deferred from the `0.2.0 MVP`:
 
 - Unattended advancement across multiple Phases.
 - Automated LLM context compaction and threshold handling.
@@ -139,4 +143,15 @@ The following capabilities are intentionally deferred from the `0.1.0 MVP` and w
 
 ## Disclaimer
 
-This is a public `0.1.0 MVP` specification and instruction skill. It is not production-proven, warranted for reliability, or endorsed by upstream tool authors.
+Local verification (Git and Node, no packages or model calls):
+
+```powershell
+node --test tests/dd-efficiency.test.mjs tests/dd-efficiency-run-index.test.mjs
+node tests/dd-efficiency-benchmark.mjs
+```
+
+Fixtures stay in ignored `tests/.dd-efficiency-scratch/`, never live projects.
+The benchmark compares identical synthetic checks including failures. Host calls
+and visible bytes are not proof of actual token/quota savings; a live A/B is needed.
+
+This is a public `0.2.0 MVP` specification, instruction skill and optional mechanical helper. It is not production-proven, warranted for reliability, or endorsed by upstream tool authors.

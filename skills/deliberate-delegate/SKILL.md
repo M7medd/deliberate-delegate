@@ -3,7 +3,7 @@ name: deliberate-delegate
 description: Durable human-gated multi-agent coordination workflow featuring two persistent planners (Planning Lead and Planner 2) and delegated executor sessions. Provides explicit Phase authorization, immutable deliberation and brief records, independent dual review, mechanical verification gates, and strict correction limits. Excludes and does not replace single-turn one-off delegation, ordinary reviews, or raw CLI provider adapters.
 license: MIT
 metadata:
-  version: 0.1.0
+  version: 0.2.0
 ---
 
 # Deliberate Delegate
@@ -45,7 +45,7 @@ Deliberate Delegate is an independent coordination layer built on top of Ahmed M
 
 ## Workflow Summary and Reference Routing
 
-Detailed rules and contracts are documented in four modular references. Consult the relevant reference before taking action:
+Detailed rules and contracts are documented in modular references. Consult the relevant reference before taking action:
 
 1. [Workflow Reference](references/workflow.md)
    *Must be read before initializing a Phase, starting Step deliberation, dispatching briefs, or handling corrections and stop gates.*
@@ -62,3 +62,7 @@ Detailed rules and contracts are documented in four modular references. Consult 
 4. [Brief and Result Contract](references/brief-contract.md)
    *Must be read before writing, reviewing, correcting, or dispatching a Step brief.*
    Defines the mandatory initial and correction brief fields, checkable acceptance criteria, canonical safety capsule, pre-dispatch gate, and Executor Report schema.
+
+5. [Lead Efficiency Helper](references/efficiency.md)
+   *Read before using the optional Node helper for snapshots, batched gates, adapter waiting or generated navigation.*
+   Keeps raw evidence outside default active context; mechanical PASS never replaces planner approval or the canonical brief.
