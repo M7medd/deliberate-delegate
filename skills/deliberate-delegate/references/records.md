@@ -23,6 +23,14 @@ docs/deliberate-delegate/
       decision.v1.md
 ```
 
+A `Step` directory represents one coherent, bounded Work Package, not each
+internal checklist item or ticket. Package boundaries are based on outcome,
+dependency, risk, and verification; a single independently verifiable change
+may be one Step. Existing approved fine-grained plans are not regrouped by
+reinterpretation. Regrouping requires a new immutable plan and the normal
+planner and user gates for any changed authorized commitments. This semantic
+clarification adds no lifecycle state and requires no migration.
+
 ---
 
 ## Immutability and Versioning Rules
@@ -123,7 +131,7 @@ Keeping `phaseState` separate from `stepState` prevents a restart from dispatchi
 
 ### Key Field Contracts
 
-- `executionProfile`: Records the actual non-secret dispatch envelope: adapter, model label, effort, exact-session resume mode, timeout, budget if any, permission profile, declared `noCommit` mode (`transport_enforced`, `tool_guarded`, or `instruction_only`), non-secret provider flags, brief-contract version, safety-policy identifier, and `outsideRuntimePathsDeclared`. The envelope may adapt transport mechanics but must never change the canonical brief's objective, scope, acceptance criteria, verification procedures, safety capsule, or result contract.
+- `executionProfile`: Records the actual non-secret dispatch envelope: adapter, model label, effort, exact-session resume mode, timeout, optional budget metadata if any, permission profile, declared `noCommit` mode (`transport_enforced`, `tool_guarded`, or `instruction_only`), non-secret provider flags, brief-contract version, safety-policy identifier, and `outsideRuntimePathsDeclared`. The envelope may adapt transport mechanics but must never change the canonical brief's objective, scope, acceptance criteria, verification procedures, safety capsule, or result contract. A budget entry records an actual inherited or user-specified limit; it is not an automatic dollar cap.
 - `outsideRuntimePathsDeclared`: List of paths created or updated outside the workspace root as reported by the executor. This is an executor declaration/claim, not independent proof. Under Option A2, every path must belong to the exact authorized fixed session, remain inside the provider's documented session/scratch/cache area, and contain runtime/session transport state only. Any undeclared or unauthorized outside write, or any outside-root deletion without direct action-specific user approval, constitutes a mechanical gate failure.
 - `correctionAttempt`: Integer (`0..2`). Increments on each corrective brief version dispatched. Reaching 3 required corrections stops the Phase.
 - `technicalRetryCount`: Integer (`0..1`). Replaying the same immutable brief version for technical transport failure does not reset this counter and does not consume a correction. It resets to `0` only when a new immutable brief version becomes active.

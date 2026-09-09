@@ -2,11 +2,17 @@
 
 > Human-gated multi-agent coordination layer for dual-planner deliberation and delegated execution.
 
-**Status:** `0.2.0 Public MVP`
+**Published status:** `0.3.0 Public MVP`
 
 Version 0.2.0 adds an optional Node 18+ helper for batched mechanical checks,
 adapter waiting and record navigation. Approval policy is unchanged.
 See [usage and limits](skills/deliberate-delegate/references/efficiency.md).
+
+Version 0.3.0 defines each Step as a coherent Work Package, reduces repeated
+planner ceremony around internal checklist items, and documents optional
+planning inputs from Matt Pocock's `to-spec` and `to-tickets`. These external
+skills are not installed or tested by this package, and no efficiency savings
+are claimed without a live comparison.
 
 **Repository:** https://github.com/M7medd/deliberate-delegate
 
@@ -23,7 +29,7 @@ Deliberate Delegate is an independent coordination layer built on and requiring 
 - **Upstream (`delegate-skills` by Ahmed Mohammed / amElnagdy):**
   Owns the implementer layer — dispatching structured briefs to provider command-line interfaces (CLIs), managing exact-session resumption, providing provider-specific adapters, and standardizing the `delegate-relay.result.v1` result contract.
 - **Coordination layer (Deliberate Delegate):**
-  Adds the multi-agent governance and coordination layer — fixed two-planner roles with equal decision authority, mandatory direct human Phase authorization, immutable deliberation and brief records, per-Step deliberation before dispatch, independent dual review following execution, strict correction limits, and deterministic stop gates.
+  Adds the multi-agent governance and coordination layer — fixed two-planner roles with equal decision authority, mandatory direct human Phase authorization, immutable deliberation and brief records, per-Work-Package (Step) deliberation before dispatch, independent dual review following execution, strict correction limits, and deterministic stop gates.
 
 ### Independence and non-endorsement
 
@@ -63,15 +69,29 @@ Deliberate Delegate is an independent coordination layer built on and requiring 
 
 ---
 
+## Work Packages (Steps)
+
+A DD Step is one coherent, bounded Work Package with a defined outcome,
+dependencies, risk boundary, and verification boundary. It is not an internal
+checklist item or ticket. Size packages by outcome, dependency, risk, and
+reviewability: one independently verifiable change may be one package; split
+when authorization, consequential unresolved decisions, independent risk, or
+review context genuinely differs. Do not combine unrelated work merely to make
+one large package. The Executor may complete and locally test internal items
+under one brief; they do not receive separate planner dispatches, debates,
+records, or checkpoints. The normal path is one substantive pre-package review
+and one independent post-package dual review, with the existing correction and
+technical-retry limits retained.
+
 ## Phase and Step loop
 
 1. **Project and Phase Planning:** Both planners formulate and agree on a phased project breakdown.
 2. **Direct Human Phase Authorization:** The human user reviews the Phase plan and explicitly authorizes execution with clear scope boundaries.
 3. **Phase Branch Creation:** The Planning Lead initializes a dedicated Git Phase branch.
-4. **Pre-Step Deliberation & Briefing:** Both planners examine current workspace evidence and debate requirements; upon unanimous agreement, the Lead records an immutable brief (`brief.v1.md`).
+4. **Pre-Work-Package Deliberation & Briefing:** Both planners examine current workspace evidence and debate requirements; upon unanimous agreement, the Lead records an immutable brief (`brief.v1.md`).
 5. **Delegated Execution:** The Planning Lead dispatches the brief to the fixed executor session via the configured upstream delegate adapter.
 6. **Lead Mechanical Verification:** The Lead independently inspects raw execution output, full Git status (including untracked and staged files), allowlist adherence, and runs local tests/linters.
-7. **Independent Dual Review:** Both planners independently review the file diff and deliverables against acceptance criteria; both must explicitly approve to proceed.
+7. **Independent Dual Review:** Both planners independently review the relevant file diff and checks for the Work Package against its acceptance criteria; both must explicitly approve to proceed.
 8. **Checkpoint or Correction:**
    - *On Approval:* Planning Lead commits an atomic Git checkpoint.
    - *On Correctable Issue:* Planning Lead generates a new versioned brief (`brief.v2.md`) and resumes the same executor session (maximum 2 correction attempts per Step).
@@ -129,7 +149,7 @@ User: I authorize execution of Phase 01 according to docs/deliberate-delegate/ph
 
 ## Deferred, not implemented
 
-The following capabilities remain deferred from the `0.2.0 MVP`:
+The following capabilities remain deferred from the `0.3.0 MVP`:
 
 - Unattended advancement across multiple Phases.
 - Automated LLM context compaction and threshold handling.
@@ -154,4 +174,4 @@ Fixtures stay in ignored `tests/.dd-efficiency-scratch/`, never live projects.
 The benchmark compares identical synthetic checks including failures. Host calls
 and visible bytes are not proof of actual token/quota savings; a live A/B is needed.
 
-This is a public `0.2.0 MVP` specification, instruction skill and optional mechanical helper. It is not production-proven, warranted for reliability, or endorsed by upstream tool authors.
+This is a public `0.3.0 MVP` specification, instruction skill and optional mechanical helper. It is not production-proven, warranted for reliability, or endorsed by upstream tool authors.

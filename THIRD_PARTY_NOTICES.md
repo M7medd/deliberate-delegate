@@ -31,3 +31,22 @@ The upstream MIT license text for `delegate-skills` is reproduced in full for at
 ### Non-Endorsement
 
 Deliberate Delegate is an independent project. It is not affiliated with, sponsored by, or endorsed by Ahmed Mohammed (amElnagdy) or the `delegate-skills` project.
+
+---
+
+## Optional planning-input sources: Matt Pocock
+
+The optional compatibility guidance in
+[`skills/deliberate-delegate/references/planning-inputs.md`](skills/deliberate-delegate/references/planning-inputs.md)
+acknowledges Matt Pocock's public engineering-skill sources:
+
+- [`to-spec`](https://github.com/mattpocock/skills/tree/main/skills/engineering/to-spec)
+- [`to-tickets`](https://github.com/mattpocock/skills/tree/main/skills/engineering/to-tickets)
+- [`grill-with-docs`](https://github.com/mattpocock/skills/tree/main/skills/engineering/grill-with-docs)
+- [`implement`](https://github.com/mattpocock/skills/tree/main/skills/engineering/implement)
+- [`wayfinder`](https://github.com/mattpocock/skills/tree/main/skills/engineering/wayfinder)
+
+These are optional external planning references, not Deliberate Delegate
+dependencies, vendored content, or authorization sources. No Matt skill is
+installed or claimed tested by this package. Deliberate Delegate does not imply
+endorsement by Matt Pocock or those source projects.

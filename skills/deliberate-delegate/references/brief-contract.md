@@ -1,10 +1,10 @@
 # Deliberate Delegate — Brief and Result Contract
 
-Read this reference when writing, reviewing, correcting, or dispatching a Step brief. The brief is the immutable, provider-neutral execution contract. Provider CLI details belong to the dispatch envelope, never to its substantive requirements.
+Read this reference when writing, reviewing, correcting, or dispatching a Work Package (Step) brief. A Step is one coherent, bounded outcome with dependency, risk, and verification boundaries; it is not an internal checklist item or ticket. The brief is the immutable, provider-neutral execution contract. Provider CLI details belong to the dispatch envelope, never to its substantive requirements.
 
 ## Pre-dispatch Gate
 
-Planning Lead and Planner 2 must agree that every mandatory field is present, internally consistent, and supported by the Phase authorization. Acceptance criteria must be individually checkable, verification procedures must be usable, and the safety capsule must match the canonical text below exactly.
+Planning Lead and Planner 2 must agree that every mandatory field is present, internally consistent, and supported by the Phase authorization. For consequential architecture, safety, or scope decisions, the independent-first evidence/question exchange precedes the recommendation-bearing draft brief. The canonical brief and its acceptance-criteria mapping cover the whole Work Package; internal checklist items do not become separate Steps or review records. Acceptance criteria must be individually checkable, verification procedures must be usable, and the safety capsule must match the canonical text below exactly. Once agreed, freeze the exact brief version for dispatch; any substantive finalization change requires renewed planner review and a new immutable version.
 
 Do not dispatch when a mandatory field is missing or contradictory. Do not ask the Executor to infer scope, authority, acceptance, or safety boundaries.
 
@@ -12,7 +12,7 @@ Do not dispatch when a mandatory field is missing or contradictory. Do not ask t
 
 Every initial brief contains:
 
-1. **Objective:** one or two sentences describing the required outcome.
+1. **Objective and Work Package boundary:** one or two sentences describing the required outcome and its dependency, risk, and verification boundary. An internal checklist may be included as execution detail, but it is not a separate dispatch or record unit.
 2. **Authorized scope and exact file allowlist:** the only paths the Executor may create or change.
 3. **Acceptance criteria:** identifiers `AC-1` through `AC-n`, each answerable yes or no from a file, diff, or command result.
 4. **Verification procedures:** exact runnable commands. When no command exists, record the reason and the explicit mechanical inspection agreed by both planners; an unexplained `none` is invalid.

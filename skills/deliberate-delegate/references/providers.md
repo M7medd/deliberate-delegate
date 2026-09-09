@@ -66,6 +66,25 @@ Deliberate Delegate coordinates multi-agent planning and relies on upstream `*-d
 
 ---
 
+## Planner budgets and dispatch limits
+
+- Planner 2 has no automatic dollar cap. Do not add `--max-budget-usd` unless
+  the user explicitly requests a cap for that run.
+- Generic budget metadata is optional. When the user or an approved executor
+  dispatch configuration supplies a limit, record the actual effective limit
+  and do not silently drop inherited or mandatory provider limits. This is
+  instruction and dispatch policy, not helper enforcement.
+- Keep timeout, `maxTurns`, provider limits, correction limits, and the single
+  technical-retry safeguard. Do not claim that a timeout or `maxTurns` setting
+  automatically saves tokens, and do not introduce a numeric Planner 2 call
+  ceiling or an 85% quota pause without explicit approval.
+- A nontransient exhausted quota, authentication, or budget failure is not a
+  blind replay condition. Require evidence that the relevant condition is
+  resolved and reconcile prior partial work before the one permitted technical
+  retry; otherwise stop and escalate.
+
+---
+
 ## Canonical Brief and Dispatch Envelope
 
 - The immutable Step brief is provider-neutral and conforms to [the Brief and Result Contract](brief-contract.md).

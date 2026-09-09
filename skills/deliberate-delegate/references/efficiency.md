@@ -1,10 +1,12 @@
 # Lead-side efficiency helper
 
-Read before using `scripts/dd-efficiency.mjs`. Requires Node 18+ and Git; no
-packages, daemon, database or provider transport. It reduces host/model
-interactions, not mandatory review. It never approves, retries, commits, changes
-state, replaces sessions or starts another Phase. The exact safety capsule and
-all human/planner gates remain mandatory.
+Read this reference before the first applicable check or dispatch in a DD run.
+Choose the optional helper when it is compatible; otherwise record the concrete
+incompatibility and equivalent check coverage in Lead evidence. Requires Node
+18+ and Git; no packages, daemon, database or provider transport. It reduces
+host/model interactions, not mandatory review. It never approves, retries,
+commits, changes state, replaces sessions or starts another Phase. The exact
+safety capsule and all human/planner gates remain mandatory.
 
 ## Snapshot and gate
 
@@ -70,6 +72,10 @@ supply the exact authorized ID. Unlike snapshot/gate, run/index accept any expli
 project directory (no Git is needed for waiting or navigation). All run/index tests
 use isolated non-repository directories; use the repository root in the workflow.
 
+The helper's CLI `run` wrapper is optional. Do not force it around a native
+in-process delegation path; apply the same exact-session, raw-result, and
+verification requirements and record the equivalent coverage.
+
 `--timeout-ms` defaults to 1800000; `0` disables it. Timeout requests child kill
 only. After the owned process exits, log draining is bounded to five seconds;
 expiry closes the streams, sets `logDrainTimedOut: true` and fails. Raw logs may
@@ -97,11 +103,21 @@ state record. New runs may use `raw/attempt-NN/` with adapter/gate subdirectorie
 Old records are not moved, deleted, migrated or deduplicated.
 
 Load the active pointer, governing rules, accepted requirements and relevant
-evidence. Initial dual review examines the implementation; correction review uses
+evidence. Compact summaries do not replace raw evidence. Initial dual review
+examines the actual implementation diff and checks; correction review uses
 parent decision/evidence references, defect IDs, correction diff, affected criteria
 and regression outputs. Either planner can expand inspection within authorized
-read scope. Contradictions reopen affected findings; both explicit approvals,
-full canonical briefs and verbatim visible debate preservation remain required.
+read scope without automatically receiving new write scope. Contradictions reopen
+affected findings; both explicit approvals, full canonical briefs and verbatim
+visible debate preservation remain required.
 
-Archive bytes are not token consumption. Synthetic benchmarks measure host calls
-and visible bytes only; actual token, cost and quota gains require a live A/B.
+## Measurement claims
+
+For each accepted equivalent result, record all failed attempts, calls, cache
+creation and reads, outputs, and defects. Compare packaging choices separately
+from helper use or a changed cap; do not attribute a packaging difference to the
+helper. Cached input/list processing is not paid subscription usage; cached
+token counts and list-price estimates do not establish billed cost or
+subscription quota. If the cause of cache recreation is unknown, record that
+cause as unknown. Host-call counts and visible bytes are not measured token,
+cost, or quota savings; a live A/B is required for that claim.
