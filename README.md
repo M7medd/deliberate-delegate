@@ -2,7 +2,12 @@
 
 > Human-gated multi-agent coordination layer for dual-planner deliberation and delegated execution.
 
-**Current release:** `0.4.1`
+**Current release:** `0.4.2`
+
+Version 0.4.2 adds a dependency-free, append-only usage recorder for controlled
+experiments. It captures exact Codex rollout and delegate-run sources, prefers
+Claude `modelUsage`, records provider rate-limit events when present, includes
+failed attempts, and leaves unavailable measurements as `unknown`.
 
 Version 0.4.1 makes Claude Planner 2 auto-compaction a verified preflight
 requirement: every substantive launch/resume must enable `--autocompact 400k`.
@@ -153,10 +158,11 @@ User: I authorize execution of Phase 01 according to docs/deliberate-delegate/ph
 
 ## Deferred, not implemented
 
-The following capabilities remain deferred from the `0.4.0` release:
+The following capabilities remain deferred from the `0.4` series:
 
 - Unattended advancement across multiple Phases.
-- Automated LLM context compaction and threshold handling.
+- Automated cross-provider context-occupancy monitoring. Claude launch
+  auto-compaction policy is already present.
 - Automated provider usage threshold pause (>90% usage guard).
 - Windows Job Object process-tree termination unless independently proven.
 - Automatic agent replacement or dynamic failover.
@@ -170,14 +176,15 @@ The following capabilities remain deferred from the `0.4.0` release:
 Local verification (Git and Node, no packages or model calls):
 
 ```powershell
-node --test tests/dd-efficiency.test.mjs tests/dd-efficiency-run-index.test.mjs tests/dd-v04.test.mjs
+node --test tests/dd-efficiency.test.mjs tests/dd-efficiency-run-index.test.mjs tests/dd-v04.test.mjs tests/dd-usage.test.mjs
 node tests/dd-efficiency-benchmark.mjs
 ```
 
-Fixtures stay in ignored `tests/.dd-efficiency-scratch/` and `tests/.dd-v04-scratch/`, never live projects.
+Fixtures stay in ignored `tests/.dd-efficiency-scratch/`, `tests/.dd-v04-scratch/`,
+and `tests/.dd-usage-scratch/`, never live projects.
 The benchmark compares identical synthetic checks including failures. Host calls
 and visible bytes are not proof of actual token/quota savings; a live A/B is needed.
 
-This is a `0.4.0` specification, instruction skill and optional
-mechanical helper. It is not released or production-proven, warranted for
-reliability, or endorsed by upstream tool authors.
+This is a `0.4.2` specification, instruction skill, and optional mechanical
+helper. It is not production-proven, warranted for reliability, or endorsed by
+upstream tool authors.

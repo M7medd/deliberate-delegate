@@ -3,7 +3,7 @@ name: deliberate-delegate
 description: Human-gated multi-agent coordination with durable project records, risk-sensitive planner review, awaitable Work Package execution, independent dual review, and bounded recovery.
 license: MIT
 metadata:
-  version: 0.4.1
+  version: 0.4.2
 ---
 
 # Deliberate Delegate
@@ -84,6 +84,12 @@ SHA-256 is an integrity check only when the expected digest is trusted. It is
 not a signature, identity proof, or provenance proof. Provider usage is recorded
 only when the provider reports it; DD invents no cost, quota, or token claim.
 
+For a user-authorized usage experiment, initialize the usage ledger before the
+Lead's first project inspection, take a zero-delta Lead baseline, and capture
+each terminal planner/executor attempt—including failures—at the next Work
+Package boundary. Use the mechanical recorder linked below; do not ask agents
+to reconstruct consumption from memory or load transcripts to calculate it.
+
 ## Correction and recovery boundaries
 
 The Phase configures the correction policy. The backward-compatible default is
@@ -114,6 +120,9 @@ Read only the detail needed for the current action:
    checks and raw-evidence handling.
 7. [Optional planning inputs](references/planning-inputs.md) — local-only
    integration of external planning skills.
+8. [Usage recorder](scripts/dd-usage.md) — initialize usage evidence before an
+   experiment, capture exact role/run sources at Work Package boundaries, and
+   generate a compact measured summary without transcript rereads.
 
 Plan agreement never authorizes a Phase. The user must directly authorize the
 Phase with an explicit scope and completion boundary. A completed Phase stops
