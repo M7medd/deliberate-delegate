@@ -133,21 +133,28 @@ Keeping `phaseState` separate from `stepState` prevents a restart from dispatchi
   },
   "contextManagement": {
     "authoritative": false,
-    "capability": "provider_native_manual",
+    "role": "planner2",
+    "provider": "claude",
+    "requiredMode": "automatic",
+    "requestedSetting": "--autocompact 400k",
+    "capability": "adapter_flag",
+    "effectiveSettingEvidence": "verified launch envelope",
+    "preflightStatus": "verified",
     "thresholdPolicy": {
-      "occupancyPercent": 40,
       "targetWindowTokens": 1000000,
       "targetCompactionTokens": 400000
     },
-    "observedOccupancy": {
-      "platform": "Windows",
-      "providerVersion": "Claude Code 2.1.267",
-      "observedOn": "2026-09-10",
-      "reportedAfterCompaction": "56.4k/400k (14%)"
+    "observedOccupancy": "unknown",
+    "manualRecovery": {
+      "allowedOnlyAfter": [
+        "automatic_compaction_failed",
+        "concrete_context_problem_observed"
+      ],
+      "trigger": null,
+      "method": null,
+      "result": null
     },
-    "compactMethod": "provider-native in-place manual",
-    "compactResult": "reported",
-    "adapterFlagAvailable": false
+    "adapterFlagAvailable": true
   },
   "activeArtifacts": {
     "authorization": "phases/phase-01/authorization.v1.md",
@@ -175,7 +182,7 @@ Keeping `phaseState` separate from `stepState` prevents a restart from dispatchi
 ### Key Field Contracts
 
 - `executionProfile`: Records the actual non-secret dispatch envelope: adapter, model label, effort, exact-session resume mode, timeout, optional budget metadata if any, permission profile, declared `noCommit` mode (`transport_enforced`, `tool_guarded`, or `instruction_only`), non-secret provider flags, brief-contract version, safety-policy identifier, and `outsideRuntimePathsDeclared`. The envelope may adapt transport mechanics but must never change the canonical brief's objective, scope, acceptance criteria, verification procedures, safety capsule, or result contract. A budget entry records an actual inherited or user-specified limit; it is not an automatic dollar cap.
-- `contextManagement`: A non-authoritative evidence envelope. Record the capability classification (`adapter_flag`, `provider_native_manual`, or `unsupported`), threshold policy, target window/compaction target, observed occupancy when available, compact method/result, and whether an adapter flag was available. Unknown provider metrics remain `unknown`. Context occupancy and compaction are separate from five-hour subscription usage or quota.
+- `contextManagement`: A non-authoritative evidence envelope. When Claude is Planner 2, record role/provider, required automatic mode, requested `--autocompact 400k` setting, capability classification (`adapter_flag`, `provider_native_auto`, `provider_native_manual`, or `unsupported`), evidence of the effective setting for the current launch/resume, and a `verified` preflight result before every substantive call. A prior launch or session ID is not evidence that the setting persists. If the setting cannot be passed or verified, record `unsupported` and stop before the call. Manual recovery records its concrete trigger, method, and result and is allowed only after automatic compaction fails or a context problem is observed; it is never scheduled routinely. Unknown provider metrics remain `unknown`. Context occupancy and compaction are separate from five-hour subscription usage or quota.
 - `outsideRuntimePathsDeclared`: List of paths created or updated outside the workspace root as reported by the executor. This is an executor declaration/claim, not independent proof. Under Option A2, every path must belong to the exact authorized role session for the Work Package, remain inside the provider's documented session/scratch/cache area, and contain runtime/session transport state only. Any undeclared or unauthorized outside write, or any outside-root deletion without direct action-specific user approval, constitutes a mechanical gate failure.
 - `correctionAttempt`: Integer from `0` through the Phase-configured
   `correctionPolicy.maxCorrections`; the absolute v0.4 ceiling is `3`.

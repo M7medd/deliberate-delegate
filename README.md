@@ -2,7 +2,12 @@
 
 > Human-gated multi-agent coordination layer for dual-planner deliberation and delegated execution.
 
-**Current release:** `0.4.0`
+**Current release:** `0.4.1`
+
+Version 0.4.1 makes Claude Planner 2 auto-compaction a verified preflight
+requirement: every substantive launch/resume must enable `--autocompact 400k`.
+Manual compaction is reserved for an actual automatic-compaction failure or a
+concrete context problem; it is not a routine step.
 
 Version 0.4.0 adds the awaitable Work Package path, persistent job and
 result-capsule evidence, risk-sensitive review, bounded correction policy, and

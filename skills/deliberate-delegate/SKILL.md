@@ -3,7 +3,7 @@ name: deliberate-delegate
 description: Human-gated multi-agent coordination with durable project records, risk-sensitive planner review, awaitable Work Package execution, independent dual review, and bounded recovery.
 license: MIT
 metadata:
-  version: 0.4.0
+  version: 0.4.1
 ---
 
 # Deliberate Delegate
@@ -25,6 +25,15 @@ review, and gates.
 - Planner 2 has Phase-scoped continuity by default for v0.4. A
   fresh-per-package Planner 2 is an experiment, not the recommendation, because
   cache-creation cost is unresolved.
+- When Claude is Planner 2, every substantive launch or resume must have an
+  effective `--autocompact 400k` setting verified in the dispatch envelope or
+  provider evidence before the call. Do not assume a setting from an earlier
+  launch persists. If the active adapter cannot pass or verify it, stop and
+  report the compatibility gap instead of claiming it is enabled.
+- Manual compaction is recovery only: use it in the exact same session when
+  automatic compaction actually fails or a concrete context problem appears,
+  then record the trigger and result. Never schedule manual compaction merely
+  because another review or Work Package is starting.
 - Executor is scoped to one Work Package, including its authorized corrections
   and one permitted technical replay. Starting the next package with the same
   approved role holder and a new package session is not role replacement.
