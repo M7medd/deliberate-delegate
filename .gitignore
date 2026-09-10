@@ -1,3 +1,4 @@
 # Behavioral tests and the deterministic mechanical benchmark create only
 # disposable in-repository fixtures here.  They never touch the source repo.
 tests/.dd-efficiency-scratch/
+tests/.dd-v04-scratch/

@@ -2,21 +2,18 @@
 
 > Human-gated multi-agent coordination layer for dual-planner deliberation and delegated execution.
 
-**Published status:** `0.3.0 Public MVP`
+**Current release:** `0.4.0`
 
-Version 0.2.0 adds an optional Node 18+ helper for batched mechanical checks,
-adapter waiting and record navigation. Approval policy is unchanged.
-See [usage and limits](skills/deliberate-delegate/references/efficiency.md).
-
-Version 0.3.0 defines each Step as a coherent Work Package, reduces repeated
-planner ceremony around internal checklist items, and documents optional
-planning inputs from Matt Pocock's `to-spec` and `to-tickets`. These external
-skills are not installed or tested by this package, and no efficiency savings
-are claimed without a live comparison.
+Version 0.4.0 adds the awaitable Work Package path, persistent job and
+result-capsule evidence, risk-sensitive review, bounded correction policy, and
+shared lifecycle mechanics. It does not claim token, cost, quota, or universal
+suspension savings without a controlled host-telemetry pilot. See [awaiting and
+capsules](skills/deliberate-delegate/references/suspension.md) and [usage and
+limits](skills/deliberate-delegate/references/efficiency.md).
 
 **Repository:** https://github.com/M7medd/deliberate-delegate
 
-Deliberate Delegate is an instruction skill and documentation package that establishes a structured, human-authorized engineering loop. It coordinates two collaborating planners (Planning Lead and Planner 2) overseeing a fixed, resumable executor session across phased file-based project work.
+Deliberate Delegate is an instruction skill and documentation package that establishes a structured, human-authorized engineering loop. It coordinates two planners (Planning Lead and Planner 2) overseeing Work Package-scoped, resumable executor sessions across phased file-based project work.
 
 ---
 
@@ -29,7 +26,7 @@ Deliberate Delegate is an independent coordination layer built on and requiring 
 - **Upstream (`delegate-skills` by Ahmed Mohammed / amElnagdy):**
   Owns the implementer layer — dispatching structured briefs to provider command-line interfaces (CLIs), managing exact-session resumption, providing provider-specific adapters, and standardizing the `delegate-relay.result.v1` result contract.
 - **Coordination layer (Deliberate Delegate):**
-  Adds the multi-agent governance and coordination layer — fixed two-planner roles with equal decision authority, mandatory direct human Phase authorization, immutable deliberation and brief records, per-Work-Package (Step) deliberation before dispatch, independent dual review following execution, strict correction limits, and deterministic stop gates.
+  Adds the multi-agent governance and coordination layer — two planner roles with equal decision authority, mandatory direct human Phase authorization, immutable deliberation and brief records, risk-sensitive Work Package review, awaitable execution, independent dual review following execution, bounded correction policy, and deterministic stop gates.
 
 ### Independence and non-endorsement
 
@@ -45,7 +42,7 @@ Deliberate Delegate is an independent coordination layer built on and requiring 
 ### This skill IS:
 - A provider-neutral and domain-neutral instruction skill and process specification.
 - A human-in-the-loop framework requiring explicit human authorization before executing any project Phase.
-- A dual-planner protocol requiring unanimous planner consensus on briefs and dual independent review of file diffs and project deliverables.
+- A risk-tiered planner protocol: routine packages use the Lead's mechanical completeness gate, reviewed/deliberate packages receive the required Planner 2 pre-review, and every package receives independent dual post-review. Unanimity remains required for project/Phase plans, risk-tier downgrades, consequential decisions, and post-implementation acceptance.
 - A durable record system with immutable transcripts, versioned briefs, and structured state tracking.
 
 ### This skill IS NOT:
@@ -56,16 +53,18 @@ Deliberate Delegate is an independent coordination layer built on and requiring 
 
 ---
 
-## The three fixed roles
+## The three roles
 
 1. **Planning Lead (Lead Planner):**
-   User-facing planner responsible for interacting with the human user, recording immutable transcripts and briefs, managing Git branches and checkpoint commits, and conducting mechanical verification. Holds equal decision weight with Planner 2. Persistent across the entire project.
+   User-facing planner responsible for interacting with the human user, recording immutable transcripts and briefs, managing Git branches and checkpoint commits, and conducting mechanical verification. Holds equal decision weight with Planner 2 and is project-long by default.
 2. **Planner 2 (Review Planner):**
-   Independent peer planner responsible for critical analysis, pre-Step deliberation, and post-Step dual review against requirements. Holds equal decision weight with Planning Lead. Persistent across the entire project.
+   Independent peer planner responsible for critical analysis, risk-tier review, and post-Work-Package dual review against requirements. Holds equal decision weight with Planning Lead and defaults to Phase-scoped continuity in v0.4.
 3. **Executor:**
-   Fixed, resumable delegated worker session executing focused implementation briefs within the project workspace via an installed upstream delegate adapter. The executor does not make architecture decisions, does not run Git commands, and does not interact directly with the user. Persistent across the entire project.
+   Work Package-scoped, resumable delegated worker session executing focused implementation briefs within the project workspace via an installed upstream delegate adapter. The executor does not make architecture decisions, does not run Git commands, and does not interact directly with the user.
 
-*Note:* Session identities for all three roles remain fixed throughout the project and are reused across all Phases. Replacing any session requires explicit direct human approval.
+Replacing a role holder requires explicit direct human approval. Starting the next
+package with the same approved role holder and a new package-scoped Executor
+session is not replacement; no session inherits authority from identity or history.
 
 ---
 
@@ -79,22 +78,22 @@ when authorization, consequential unresolved decisions, independent risk, or
 review context genuinely differs. Do not combine unrelated work merely to make
 one large package. The Executor may complete and locally test internal items
 under one brief; they do not receive separate planner dispatches, debates,
-records, or checkpoints. The normal path is one substantive pre-package review
-and one independent post-package dual review, with the existing correction and
-technical-retry limits retained.
+records, or checkpoints. The normal path is one tier-appropriate pre-package
+gate and one independent post-package dual review, with the existing correction
+and technical-retry limits retained.
 
 ## Phase and Step loop
 
 1. **Project and Phase Planning:** Both planners formulate and agree on a phased project breakdown.
 2. **Direct Human Phase Authorization:** The human user reviews the Phase plan and explicitly authorizes execution with clear scope boundaries.
 3. **Phase Branch Creation:** The Planning Lead initializes a dedicated Git Phase branch.
-4. **Pre-Work-Package Deliberation & Briefing:** Both planners examine current workspace evidence and debate requirements; upon unanimous agreement, the Lead records an immutable brief (`brief.v1.md`).
-5. **Delegated Execution:** The Planning Lead dispatches the brief to the fixed executor session via the configured upstream delegate adapter.
+4. **Pre-Work-Package Review & Briefing:** The Lead records the risk tier and owns routine-package completeness; Planner 2 joins the structured pre-review for `reviewed` packages and independent-first deliberation for `deliberate` packages. The Lead then records the immutable brief (`brief.v1.md`) under the applicable gate.
+5. **Delegated Execution:** The Planning Lead dispatches the brief once to the Work Package-scoped executor via the configured adapter and awaits the owned terminal process/result condition without model-driven polling. Suspension is `unknown` unless host telemetry proves `enforced`; unavailable suspension stops without fallback.
 6. **Lead Mechanical Verification:** The Lead independently inspects raw execution output, full Git status (including untracked and staged files), allowlist adherence, and runs local tests/linters.
 7. **Independent Dual Review:** Both planners independently review the relevant file diff and checks for the Work Package against its acceptance criteria; both must explicitly approve to proceed.
 8. **Checkpoint or Correction:**
    - *On Approval:* Planning Lead commits an atomic Git checkpoint.
-   - *On Correctable Issue:* Planning Lead generates a new versioned brief (`brief.v2.md`) and resumes the same executor session (maximum 2 correction attempts per Step).
+   - *On Correctable Issue:* Planning Lead generates a new versioned brief (`brief.v2.md`) and resumes the Work Package session under the Phase correction policy (default 2, absolute v0.4 ceiling 3; no-progress stops).
 9. **Phase Completion & Merge Gate:** Once all Steps are verified and accepted, execution halts for human review and pull request / merge authorization.
 
 ---
@@ -104,7 +103,7 @@ technical-retry limits retained.
 Unattended operations performed during authorized execution are strictly **file-only** within the project directory:
 
 - **Workspace deliverables boundary:** All task deliverables and task-driven project changes remain strictly confined to the project root.
-- **Provider-runtime exception (Option A2):** Outside the project root, a provider runtime may create or update session-scoped runtime state only inside its documented provider-owned session, scratch, or cache directory when it belongs to the exact fixed session authorized for the project and its provenance can be verified.
+- **Provider-runtime exception (Option A2):** Outside the project root, a provider runtime may create or update session-scoped runtime state only inside its documented provider-owned session, scratch, or cache directory when it belongs to the exact authorized role session for the Work Package and its provenance can be verified.
 - **Strict prohibitions outside root:** Provider runtime state may contain only runtime/session transport data, never project deliverables, copied project content, or secrets. Unattended deletion outside the project root is prohibited; if deletion is required, the Phase stops for direct, action-specific user authorization. Accessing credentials, secrets, auth stores, environment keyrings, unrelated private files, or another session's runtime state is strictly forbidden. Narrowly necessary reads of installed provider/skill documentation are permitted when allowed by the host environment.
 - **Declaration and verification:** Every outside-root path created or updated by a run must be declared in the executor report (a claim of `none` is not evidence by itself). An unauthorized outside-root write or any outside-root deletion without direct approval is a gate failure and stops the Phase. The Lead reports the limits of host observability.
 - **Requiring explicit direct human authorization:** External network operations beyond LLM transport, deployments, package installations, account/credential modifications, purchases, messaging, or interactions with live external systems.
@@ -149,12 +148,12 @@ User: I authorize execution of Phase 01 according to docs/deliberate-delegate/ph
 
 ## Deferred, not implemented
 
-The following capabilities remain deferred from the `0.3.0 MVP`:
+The following capabilities remain deferred from the `0.4.0` release:
 
 - Unattended advancement across multiple Phases.
 - Automated LLM context compaction and threshold handling.
 - Automated provider usage threshold pause (>90% usage guard).
-- Advanced subprocess-tree monitoring and hard process termination.
+- Windows Job Object process-tree termination unless independently proven.
 - Automatic agent replacement or dynamic failover.
 - Multi-Phase orchestration pipelines.
 - Domain-specific or live hardware adapters.
@@ -166,12 +165,14 @@ The following capabilities remain deferred from the `0.3.0 MVP`:
 Local verification (Git and Node, no packages or model calls):
 
 ```powershell
-node --test tests/dd-efficiency.test.mjs tests/dd-efficiency-run-index.test.mjs
+node --test tests/dd-efficiency.test.mjs tests/dd-efficiency-run-index.test.mjs tests/dd-v04.test.mjs
 node tests/dd-efficiency-benchmark.mjs
 ```
 
-Fixtures stay in ignored `tests/.dd-efficiency-scratch/`, never live projects.
+Fixtures stay in ignored `tests/.dd-efficiency-scratch/` and `tests/.dd-v04-scratch/`, never live projects.
 The benchmark compares identical synthetic checks including failures. Host calls
 and visible bytes are not proof of actual token/quota savings; a live A/B is needed.
 
-This is a public `0.3.0 MVP` specification, instruction skill and optional mechanical helper. It is not production-proven, warranted for reliability, or endorsed by upstream tool authors.
+This is a `0.4.0` specification, instruction skill and optional
+mechanical helper. It is not released or production-proven, warranted for
+reliability, or endorsed by upstream tool authors.

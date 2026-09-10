@@ -8,16 +8,26 @@ This document defines the 12 lifecycle rules, operational boundaries, and stop g
 
 - **Planning Lead:** Facilitates user interaction, records immutable transcripts and briefs, manages Git branches and checkpoints, and runs mechanical verification.
 - **Planner 2:** Acts as an independent peer reviewer, analyzing proposals and evaluating implementation evidence.
-- **Equal Authority:** Both planners hold equal decision weight on plans, step scopes, and acceptance. Neither planner may overrule the other. Unanimous explicit agreement is mandatory to proceed.
+- **Equal Authority:** Both planners hold equal decision weight where the tiered workflow requires them. Unanimous explicit agreement is mandatory for project/Phase plans, risk-tier downgrades, consequential decisions, and post-implementation acceptance. A routine package may be dispatched by the Lead after its mechanical completeness gate; `reviewed` and `deliberate` packages require their specified Planner 2 pre-review.
 - **Advisory Subagents:** Any spawned auxiliary or subagent sessions are strictly advisory and cannot alter project leadership or bypass planner consensus.
 
 ---
 
-## 2. Persistent Exact Sessions
+## 2. Role and Session Lifetimes
 
-- The Planning Lead, Planner 2, and Executor must maintain persistent, addressable session identities throughout the entire project. Each Phase reuses these fixed sessions.
-- Replacing any agent session requires direct human user approval.
-- Silence, non-responsiveness, or technical disconnections never constitute agreement or consensus.
+- The Planning Lead is project-long by default and remains user-facing, but the
+  session is not the authority record. Direct human authorization and immutable
+  records are authoritative.
+- Planner 2 defaults to Phase-scoped continuity for v0.4. Fresh-per-package
+  Planner 2 is an experiment, not a recommendation, because cache-creation cost
+  is unresolved.
+- The Executor session is scoped to one Work Package, including its authorized
+  corrections and technical replay. Starting the next package with the same
+  approved role holder and a new package session is not replacement.
+- Replacing a role holder requires direct human user approval. No session
+  inherits authority from identity or history.
+- Silence, non-responsiveness, or technical disconnections never constitute
+  agreement or consensus.
 
 ---
 
@@ -47,21 +57,39 @@ This document defines the 12 lifecycle rules, operational boundaries, and stop g
 
 ---
 
-## 5. Pre-Step Deliberation
+## 5. Pre-Step Review and Deliberation
 
-- Prior to every Work Package (Step), Planning Lead and Planner 2 examine current evidence, test outputs, and requirements relevant to that package. Keep governing rules and active references available; do not reload the entire archive by default.
-- For routine package decisions, the Lead shares the canonical draft brief with Planner 2 in this substantive pre-package review so scope, acceptance criteria, completeness, and the proposed approach are checked together. Internal checklist items are not separate review units.
+- Prior to every Work Package (Step), the Planning Lead examines current evidence, test outputs, and requirements relevant to that package and records the proposed risk tier. Planner 2 joins the pre-step review only when required by that tier or when escalating it. Keep governing rules and active references available; do not reload the entire archive by default.
+- The Lead proposes one risk tier: `routine`, `reviewed`, or `deliberate`.
+  `routine` may dispatch without Planner 2 pre-review; `reviewed` requires one
+  structured Planner 2 verdict; `deliberate` requires independent-first bounded
+  deliberation. Planner 2 may escalate unilaterally. A downgrade requires both
+  planners and an immutable record. Every tier still requires Lead + Planner 2
+  independent post-implementation review.
+- For `reviewed` package decisions, the Lead shares the canonical draft brief
+  with Planner 2 in one substantive pre-package review so scope, acceptance
+  criteria, completeness, and the proposed approach are checked together.
+  Internal checklist items are not separate review units.
 - For decisions that can materially change architecture, safety, or scope, the independent-first order takes precedence: Planning Lead first sends the shared evidence and question without a recommendation, Planner 2 records an independent first-pass position, and only then does the Lead present its recommendation and draft brief. Routine implementation details do not require this extra round.
-- Both planners debate the technical approach, edge cases, verification requirements, and file scope.
-- Concrete blockers trigger bounded follow-up or correction; after clear approval, do not add repetitive approval or synthesis confirmations.
-- When both planners explicitly agree, the Planning Lead writes an immutable versioned brief (`brief.v1.md`) conforming to [the Brief and Result Contract](brief-contract.md) and a pre-debate transcript (`debate.pre.v1.md`). All visible planner messages are preserved verbatim in chronological order without recording private hidden chain-of-thought.
-- The completeness and dispatch gate is part of this pre-package review: both planners check mandatory-field completeness, internal consistency, checkable criteria, usable verification, exact safety-capsule text, and Phase-authorization compliance. Once agreed, the exact brief version is frozen for dispatch. Any substantive finalization change requires renewed planner review and a new immutable version; it must not be rewritten after consensus without that gate. Any failure stops dispatch until a valid new brief version exists.
+- For `reviewed` and `deliberate` packages, the participating planners examine the technical approach, edge cases, verification requirements, and file scope. The structured verdict vocabulary is `APPROVE | BLOCK | NEEDS_EVIDENCE`.
+- `APPROVE` ends pre-review immediately; do not generate an approval echo or redundant synthesis message. `BLOCK` identifies concrete blockers and affected acceptance IDs, and the next review is delta-focused. `NEEDS_EVIDENCE` names the missing evidence.
+- Concrete blockers trigger bounded follow-up or correction; silence, timeout, malformed output, or technical failure is never approval.
+- After the required tier gate, the Planning Lead writes an immutable versioned brief (`brief.v1.md`) conforming to [the Brief and Result Contract](brief-contract.md). A `reviewed` or `deliberate` package also records the applicable pre-review transcript (`debate.pre.v1.md`); a routine package records the Lead's mechanical gate evidence. All visible planner messages are preserved verbatim in chronological order without recording private hidden chain-of-thought.
+- The Lead owns the completeness and dispatch gate for routine packages. For `reviewed` and `deliberate` packages, both planners check the mandatory-field completeness, internal consistency, checkable criteria, usable verification, exact safety-capsule text, and Phase-authorization compliance required by their tier. Once the applicable gate passes, the exact brief version is frozen for dispatch. Any substantive finalization change requires the tier-required renewed review and a new immutable version; it must not be rewritten after that gate. Any failure stops dispatch until a valid new brief version exists.
 
 ---
 
 ## 6. Delegated Execution
 
-- The Planning Lead dispatches the immutable brief through the configured upstream delegate adapter (from `delegate-skills`) into the fixed Executor session.
+- The Planning Lead dispatches the immutable brief once through the configured
+  upstream delegate adapter (from `delegate-skills`) into the Work Package's
+  Executor session. The awaitable `ProcessJobController` persists identity
+  before spawning and resolves on the terminal owned-process/result condition.
+- The normal path has no model-driven polling, repeated status prompts,
+  transcript rereads, or approval echoes. If host suspension is unavailable,
+  record `suspensionStatus: unavailable` and stop; never silently resume model
+  polling. Without explicit host telemetry proving zero Lead sampled turns,
+  record `unknown`, not `enforced`.
 - The normal path has one initial package dispatch. If review identifies a correctable defect or transport failure occurs, the existing correction and single technical-replay rules remain in force.
 - By default, all operations are file-only within the project workspace directory.
 
@@ -96,10 +124,10 @@ write scope. Contradictions reopen affected findings; narrow corrections need
 not reread every original source. Full briefs, the exact safety capsule, visible
 debates and both explicit planner approvals remain required.
 
-- If the implementation has correctable defects, omissions, or failing tests, the planners deliberate on the required fixes.
-- The Planning Lead creates a new immutable correction brief version (`brief.v2.md`) conforming to [the Brief and Result Contract](brief-contract.md) and dispatches it to resume the same Executor session.
-- A maximum of two correction attempts are permitted per Step (initial brief + up to 2 corrections = max 3 total dispatches).
-- If a third correction is required, the Phase immediately halts, records the failure, and returns control to the user.
+- If the implementation has correctable defects, omissions, or failing tests, the planners deliberate on the required fixes. The Phase supplies `maxCorrections`; the backward-compatible default is two and the absolute v0.4 ceiling is three. The Executor cannot raise or replace this policy.
+- A no-progress attempt means the same blocking defect remains without new relevant evidence or a meaningful delta; stop with `STOPPED_NO_PROGRESS` instead of consuming another correction.
+- The Planning Lead creates a new immutable correction brief version (`brief.v2.md`) conforming to [the Brief and Result Contract](brief-contract.md) and dispatches it to resume the same Work Package Executor session.
+- The default permits two correction attempts (initial brief plus up to 2 corrections). A configured policy may be lower or, up to the absolute ceiling, higher; a third required correction under the default policy halts the Phase.
 
 ---
 
@@ -110,6 +138,9 @@ debates and both explicit planner approvals remain required.
 - A nontransient exhausted quota, authentication, or budget failure is not blindly replayed unchanged. Before the single replay, require evidence that the relevant condition is resolved and reconcile any prior partial work; otherwise stop and escalate.
 - `technicalRetryCount` resets to `0` only when a new immutable brief version becomes active. Replaying the same brief does not reset `technicalRetryCount`.
 - A second consecutive technical failure on the same brief version, or a corrupted/non-resumable session, immediately stops the Phase and escalates to the user.
+- After restart, uncertain work is `UNKNOWN` until reconciled. A known terminal
+  result with a trusted matching idempotency key is reused and does not rerun
+  the worker. Never retry while a prior process may still write.
 
 ---
 
@@ -134,7 +165,7 @@ debates and both explicit planner approvals remain required.
 
 During unattended Phase execution:
 - **Workspace deliverables boundary:** All task deliverables and task-driven project changes remain strictly confined to the project workspace root. Permitted operations include modifying workspace files, running local tests, executing local linters/compilers, and Lead Git branch/checkpoint operations.
-- **Provider-runtime exception (Option A2):** Outside the project root, a provider runtime may create or update session-scoped runtime state only inside its documented provider-owned session, scratch, or cache directory when the state belongs to the exact fixed session authorized for the project and its provenance can be verified.
+- **Provider-runtime exception (Option A2):** Outside the project root, a provider runtime may create or update session-scoped runtime state only inside its documented provider-owned session, scratch, or cache directory when the state belongs to the exact authorized role session for the Work Package and its provenance can be verified.
 - **Prohibitions outside root:** Provider runtime state may contain only runtime/session transport data, never task deliverables, copied project content, or secrets. Outside-root deletion remains prohibited during unattended execution; if the provider requires deletion for cleanup, compaction, or any other reason, the Phase stops for direct, action-specific user authorization. Accessing credentials, secrets, auth stores, environment keyrings, unrelated private files, or another session's runtime state is strictly forbidden. Narrowly necessary reads of installed provider/skill documentation are permitted when allowed by the host environment.
 - **Outside-root declaration & gate failure:** The executor must declare every outside-root path created or updated in its report (a claim of `none` is an unverified claim, not evidence). The Lead verifies exact-session provenance with available host evidence and reports the limits of that evidence. Any unauthorized outside-root write or any outside-root deletion without direct approval constitutes a mechanical gate failure and immediately stops the Phase.
 - **External Effects:** Any actions involving external network calls (outside configured LLM transport), cloud deployments, infrastructure modifications, package installations, account updates, financial transactions, communications, or live-system actuators require direct user presence and explicit, action-specific user authorization.

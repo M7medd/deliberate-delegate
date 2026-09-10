@@ -5,7 +5,7 @@ Choose the optional helper when it is compatible; otherwise record the concrete
 incompatibility and equivalent check coverage in Lead evidence. Requires Node
 18+ and Git; no packages, daemon, database or provider transport. It reduces
 host/model interactions, not mandatory review. It never approves, retries,
-commits, changes state, replaces sessions or starts another Phase. The exact
+commits, changes state, replaces role holders or starts another Phase. The exact
 safety capsule and all human/planner gates remain mandatory.
 
 ## Snapshot and gate
@@ -47,7 +47,7 @@ Exclusions/output cannot overlap the allowlist. Existing output directories,
 traversal and owned-path symlink/junction crossings are rejected.
 This is not an adversarial filesystem sandbox or an outside-write detector.
 
-## One dispatch and a model-free wait
+## Legacy CLI `run` versus the v0.4 controller path
 
 Use the installed adapter's actual executable, argv, immutable brief, permission
 flags and exact resume ID. `$approvedAdapterArgsJson` is a JSON array prepared
@@ -57,31 +57,50 @@ from that adapter's instructions; its result path must match `--result` below.
 node "$helper" run --root . --adapter "$adapterExecutable" --args-json "$approvedAdapterArgsJson" --result docs/deliberate-delegate/raw/attempt-01/adapter/result.json --expected-session "$executorSession" --artifact-dir docs/deliberate-delegate/raw/attempt-01/adapter/wait
 ```
 
-Dispatches once, awaits the owned child, streams full logs and returns one summary.
+The CLI `run` command is the legacy wait/summary helper. It dispatches once,
+awaits the owned child, streams full logs and returns one legacy summary. It does
+not create the v0.4 job record or result capsule, enforce deterministic
+idempotency/reconciliation, or prove `suspensionStatus: enforced`. Use the
+exported `ProcessJobController` path documented in [Awaiting and Result
+Capsules](suspension.md) when v0.4 job/capsule evidence is required.
+
+The in-process controller persists a job identity before dispatch and returns
+the same Promise to concurrent callers. It is not a model-progress polling loop.
 Use the host's completion/wait facility without repeated model progress probes;
 background notification is host-dependent. Success requires process exit 0 and
 new JSON with `status: "completed"`, integer `exitCode: 0`. Expected session, when
 supplied, must match an explicit `sessionId`, `threadId`, `conversationId`,
 `sessionRef` or `session_ref` field. Missing/malformed/nonterminal/stale results,
-failed exits and mismatches fail. The full adapter contract still needs Lead review.
+failed exits and mismatches fail. A result observed before process exit is
+recorded as such; process and result terminal conditions remain separate. The
+full adapter contract still needs Lead review.
+
+The normal path has no model-driven polling, repeated status prompts, transcript
+rereads, or approval echoes. If the host cannot suspend the Lead, record
+`suspensionStatus: unavailable` and stop. Do not silently fall back to model
+polling. Without explicit host telemetry showing zero Lead sampled model turns,
+the capsule records `suspensionStatus: unknown`, even when the child wait was
+successful. Only host telemetry can justify `enforced`.
 
 Without `--expected-session`, `sessionVerification` is `not_requested` and coverage
 explicitly states continuity was not checked. Such a mechanical result cannot
-satisfy the workflow's fixed-session gate. For actual workflow dispatches always
+satisfy the Work Package's exact-session gate. For actual workflow dispatches
 supply the exact authorized ID. Unlike snapshot/gate, run/index accept any explicit
 project directory (no Git is needed for waiting or navigation). All run/index tests
 use isolated non-repository directories; use the repository root in the workflow.
 
 The helper's CLI `run` wrapper is optional. Do not force it around a native
-in-process delegation path; apply the same exact-session, raw-result, and
-verification requirements and record the equivalent coverage.
+in-process delegation path; use `ProcessJobController` or an equivalent owned
+awaitable and apply the same exact-session, raw-result, capsule, and verification
+requirements. Record the equivalent coverage.
 
 `--timeout-ms` defaults to 1800000; `0` disables it. Timeout requests child kill
 only. After the owned process exits, log draining is bounded to five seconds;
 expiry closes the streams, sets `logDrainTimedOut: true` and fails. Raw logs may
-then be incomplete and descendants may still run. Reuse the adapter's proven tree
-watchdog. Never retry while prior work may still be running; the helper cannot
-authorize retries or session changes.
+then be incomplete and descendants may still run. On Windows, report child-only
+termination unless Job Object coverage is independently proven. Never retry while
+prior work may still be running; the helper cannot authorize retries, role
+replacement, or session changes.
 
 ## Evidence and records
 

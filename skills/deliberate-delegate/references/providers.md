@@ -21,7 +21,7 @@ licence_verified: 2026-09-01
 
 ## Transport Adapter Contract
 
-Deliberate Delegate coordinates multi-agent planning and relies on upstream `*-delegate` skills for execution dispatch. To be eligible for a fixed executor role, a provider adapter must satisfy the following contract:
+Deliberate Delegate coordinates multi-agent planning and relies on upstream `*-delegate` skills for execution dispatch. To be eligible for a Work Package-scoped Executor role, a provider adapter must satisfy the following contract:
 
 1. **Install and Authentication Verification:**
    The adapter or skill must support verifying that the underlying provider CLI tool is installed and authenticated prior to dispatch.
@@ -30,7 +30,7 @@ Deliberate Delegate coordinates multi-agent planning and relies on upstream `*-d
    Execution is triggered by invoking the respective upstream delegate command owned by the installed skill.
 
 3. **Exact Session Resumption:**
-   The adapter must support resuming an exact existing session by identifier (e.g. `--session <id>` or `--conversation <id>`). Adapters that only support "resume latest" or do not support persistent session continuity are **not** eligible to serve as the fixed executor in Deliberate Delegate.
+   The adapter must support resuming an exact existing session by identifier (e.g. `--session <id>` or `--conversation <id>`). Adapters that only support "resume latest" or do not support exact continuity for the authorized Work Package are **not** eligible to serve as its Executor.
 
 4. **Result Path and Artifact Capture:**
    The execution result must be saved to a structured JSON file in the step directory (e.g. `result.vN.json`).
@@ -56,13 +56,19 @@ Deliberate Delegate coordinates multi-agent planning and relies on upstream `*-d
 
 ## Context Continuity
 
-- No automated context-management or auto-compaction orchestration exists in the `0.1.0 MVP`.
-- When a reliable provider-reported Claude context occupancy reaches 40%, the session owner performs provider-native in-place compaction in that exact same session before its next operation. The Planning Lead records the checkpoint and result.
+- Context management is recorded as non-authoritative evidence with one capability classification: `adapter_flag`, `provider_native_manual`, or `unsupported`. The record includes the threshold policy, target window, target compaction setting, observed occupancy when available, compact method/result, and whether an adapter flag was available. Unavailable metrics remain `unknown`.
+- The policy target is 40% occupancy. For a 1,000,000-token Claude window, the chosen target is `--autocompact 400k`.
+- In the tested environment, the bounded observation is: Windows, Claude Code `2.1.267`, observed `2026-09-10`; an in-place provider-native compact reported `56.4k/400k (14%)` afterward. This is one observation, not a benchmark or guarantee.
+- The installed `claude-delegate` `0.5.0` adapter does not expose or enforce `--autocompact`; the capability classification is therefore `provider_native_manual`. Until adapter support exists, the session owner must perform manual provider-native in-session compaction in the exact same session before the next substantive operation when the threshold is reached. This repository does not vendor or modify upstream adapter files.
 - This rule applies whether Claude is serving as Planning Lead or Planner 2.
 - Codex native auto-compaction remains provider-managed and does not require a Phase stop.
-- Context maintenance in place does not stop the Phase. Stop execution only if the required exact session cannot be resumed or compacted reliably; replacing any session still requires direct human user approval.
+- Context maintenance in place does not stop the Phase. Stop execution only if
+  the required exact role session cannot be resumed or compacted reliably;
+  replacing any role holder still requires direct human user approval. A new
+  Work Package may use a new Executor session with the same approved role holder
+  without treating it as replacement.
 - Never infer occupancy from unverified token estimates when the provider does not report a trustworthy metric.
-- The future >90% provider usage/quota guard remains completely separate and deferred.
+- Context occupancy/compaction is separate from five-hour subscription usage or quota. The future >90% provider usage/quota guard remains completely separate and deferred.
 
 ---
 
@@ -118,5 +124,5 @@ The following upstream adapters from `delegate-skills` are supported (without ha
 ## Operational Boundaries and Provider Runtime State
 
 - **Transport Only:** The provider/model connection serves strictly as the execution transport. Delegated agents receive no permission for independent network access, MCP tool execution, or external service interactions unless explicitly authorized by the human user.
-- **Provider Runtime External State (Option A2):** Provider CLIs may create or update external session-scoped runtime state only for the exact fixed session authorized for the project, inside the provider's documented session/scratch/cache area, with verifiable provenance and declared paths. This state may contain runtime/session transport data only; outside-root deletion is prohibited during unattended execution. For `agy-delegate`, the observed provider-owned pattern is `.gemini/antigravity-cli/brain/<conversation-id>/scratch/` (recorded generically without real identifiers or user paths). An adapter is eligible only when the Lead can apply these checks using available host evidence without claiming complete outside-root observability; otherwise the Phase stops.
+- **Provider Runtime External State (Option A2):** Provider CLIs may create or update external session-scoped runtime state only for the exact authorized role session for the Work Package, inside the provider's documented session/scratch/cache area, with verifiable provenance and declared paths. This state may contain runtime/session transport data only; outside-root deletion is prohibited during unattended execution. For `agy-delegate`, the observed provider-owned pattern is `.gemini/antigravity-cli/brain/<conversation-id>/scratch/` (recorded generically without real identifiers or user paths). An adapter is eligible only when the Lead can apply these checks using available host evidence without claiming complete outside-root observability; otherwise the Phase stops.
 - **Extensibility:** New provider adapters must be contributed upstream to `delegate-skills` or mapped only after verifying exact session resumption, structured result compliance, and no-commit enforcement. Adding or updating an adapter does not modify the Deliberate Delegate core lifecycle.
