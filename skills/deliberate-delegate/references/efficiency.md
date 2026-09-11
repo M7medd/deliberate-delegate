@@ -65,6 +65,12 @@ the bounded result capsule. The host must still keep this command inside its
 single-call wait path; a CLI process cannot prevent the host from resampling
 the Lead after a shell yield.
 
+Pass adapter argv through a project-relative `--args-file` JSON array when the
+shell cannot preserve inline JSON, or use repeated `--arg` values. The workflow
+role name `planner-2` and capsule role `planner` are intentionally different;
+the caller must pass `--role planner`. Invalid capsule roles fail before the
+artifact directory is created or the provider is launched.
+
 The CLI `run` command is the legacy wait/summary helper. It dispatches once,
 awaits the owned child, streams full logs and returns one legacy summary. It does
 not create the v0.4 job record or result capsule, enforce deterministic

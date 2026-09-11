@@ -83,6 +83,52 @@ test('CLI job uses the controller path and fails closed when host waiting is una
   assert.match(missingFlag.stderr, /suspension-available/);
 });
 
+test('CLI job rejects invalid capsule roles before dispatch with an actionable mapping', async () => {
+  for (const role of ['planner-2', 'planer']) {
+    const root = await fixture();
+    const result = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--role', role, '--suspension-available', 'true'], { encoding: 'utf8', windowsHide: true });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /executor\|planner\|mechanical/);
+    assert.match(result.stderr, /planner-2 corresponds to planner/);
+    await assert.rejects(fs.stat(path.join(root, 'dispatches')));
+    await assert.rejects(fs.stat(path.join(root, 'result.json')));
+    await assert.rejects(fs.stat(path.join(root, 'raw/job')));
+  }
+});
+
+test('adapter argv file, JSON, and repeated arguments preserve exact values and order', async () => {
+  const unusual = ['space value', 'quote"value', 'back\\slash'];
+  const code = `const fs=require('fs');fs.writeFileSync('received.json',JSON.stringify(process.argv.slice(1)));fs.writeFileSync('result.json',JSON.stringify({status:'completed',exitCode:0}));`;
+  const modes = [
+    ['file', async (root) => { await fs.writeFile(path.join(root, 'args.json'), JSON.stringify(['-e', code, ...unusual])); return ['--args-file', 'args.json']; }],
+    ['json', async () => ['--args-json', JSON.stringify(['-e', code, ...unusual])]],
+    ['repeat', async () => ['--arg', '-e', '--arg', code, ...unusual.flatMap((value) => ['--arg', value])]],
+  ];
+  for (const [name, flags] of modes) {
+    const root = await fixture();
+    const argvFlags = await flags(root);
+    const result = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, ...argvFlags, '--result', 'result.json', '--artifact-dir', `raw/${name}`, '--suspension-available', 'true'], { encoding: 'utf8', windowsHide: true });
+    assert.equal(result.status, 0, `${name}: ${result.stderr}`);
+    assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'received.json'), 'utf8')), unusual, name);
+  }
+});
+
+test('provider success followed by capsule failure is preserved and never replayed', async () => {
+  const root = await fixture();
+  const args = [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--suspension-available', 'true', '--max-summary-bytes', '512'];
+  const first = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true });
+  assert.equal(first.status, 2);
+  assert.match(first.stderr, /E_CAPSULE_LIMIT/);
+  assert.equal(await fs.readFile(path.join(root, 'dispatches'), 'utf8'), '1');
+  assert.ok((await fs.stat(path.join(root, 'raw/job/job.v1.json'))).isFile());
+  assert.ok((await fs.stat(path.join(root, 'result.json'))).isFile());
+
+  const second = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true });
+  assert.equal(second.status, 1, second.stderr);
+  assert.equal(JSON.parse(second.stdout).status, 'UNKNOWN');
+  assert.equal(await fs.readFile(path.join(root, 'dispatches'), 'utf8'), '1');
+});
+
 test('missing expected session reports unchecked continuity in a non-repository root', async () => {
   const root = await fixture();
   const result = await runAdapter({ root, adapter: process.execPath, args: ['-e', program({ status: 'completed', exitCode: 0 })], result: 'result.json', artifactDir: 'raw/no-session' });

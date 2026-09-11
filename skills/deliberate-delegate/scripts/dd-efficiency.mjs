@@ -38,6 +38,7 @@ import {
   writeSummary as coreWriteSummary,
 } from "./lib/lifecycle-core.mjs";
 import { dispatchProcessJob } from "./lib/job-controller.mjs";
+import { ROLE_STATUS_VOCABULARY } from "./lib/result-capsule.mjs";
 
 const SUMMARY_SCHEMA = "dd-efficiency.summary.v1";
 const SNAPSHOT_SCHEMA = "dd-efficiency.snapshot.v1";
@@ -685,7 +686,7 @@ function parseArgs(argv) {
   const options = {};
   const positionals = [];
   const repeat = new Set(["allow", "exclude", "validator-json", "arg"]);
-  const known = new Set(["root", "out", "baseline", "allow", "exclude", "validator-json", "arg", "validators", "artifact-dir", "timeout-ms", "max-summary-bytes", "adapter", "args-json", "result", "expected-session", "records", "role", "job-record", "capsule", "suspension-available"]);
+  const known = new Set(["root", "out", "baseline", "allow", "exclude", "validator-json", "arg", "validators", "artifact-dir", "timeout-ms", "max-summary-bytes", "adapter", "args-json", "args-file", "result", "expected-session", "records", "role", "job-record", "capsule", "suspension-available"]);
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token.startsWith("--")) {
@@ -710,9 +711,26 @@ function parseArgs(argv) {
 
 function parseJsonArgs(value, label) {
   if (!value) return [];
-  const parsed = JSON.parse(value);
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    fail(`${label} must be a JSON array of strings`, "E_ARGS");
+  }
   if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) fail(`${label} must be a JSON array of strings`, "E_ARGS");
   return parsed;
+}
+
+async function adapterArgs(options) {
+  if (options.argsFile !== undefined) {
+    if (options.argsJson !== undefined || options.arg !== undefined) fail("--args-file cannot be combined with --args-json or --arg", "E_ARGS");
+    const root = await realDirectory(options.root, "root");
+    const relative = assertRelativeInput(options.argsFile, "args file");
+    const serialized = (await readOwnedFile(root, relative, "args file")).toString("utf8");
+    return parseJsonArgs(serialized, "args file");
+  }
+  const parsed = parseJsonArgs(options.argsJson, "args-json");
+  return parsed.length === 0 && options.arg ? options.arg : parsed;
 }
 
 async function cli(argv = process.argv.slice(2)) {
@@ -723,9 +741,9 @@ async function cli(argv = process.argv.slice(2)) {
       "  snapshot --root <repo> --out <relative-json> [--allow <checked-scope>]",
       "  gate --root <repo> --baseline <relative-json> --allow <path> [--allow <dir>] [--validators <relative-json>]",
       "       [--artifact-dir <fresh-relative-dir>] [--timeout-ms <n>]",
-      "  run --root <project> --adapter <executable> --args-json <json-array> --result <relative-json>",
+      "  run --root <project> --adapter <executable> [--args-json <json-array> | --args-file <relative-json> | --arg <value>...] --result <relative-json>",
       "      [--expected-session <id>] [--artifact-dir <fresh-relative-dir>] [--timeout-ms <n>]",
-      "  job --root <project> --adapter <executable> --args-json <json-array> --result <relative-json>",
+      "  job --root <project> --adapter <executable> [--args-json <json-array> | --args-file <relative-json> | --arg <value>...] --result <relative-json>",
       "      --artifact-dir <fresh-relative-dir> --suspension-available <true|false>",
       "      [--expected-session <id>] [--role <role>] [--job-record <relative-json>]",
       "      [--capsule <relative-json>] [--timeout-ms <n>]",
@@ -752,15 +770,17 @@ async function cli(argv = process.argv.slice(2)) {
     result = await runGate(options);
   } else if (command === "run") {
     options.adapter = options.adapter;
-    options.args = parseJsonArgs(options.argsJson, "args-json");
-    if (options.args.length === 0 && options.arg) options.args = options.arg;
+    options.args = await adapterArgs(options);
     result = await runAdapter(options);
   } else if (command === "job") {
-    options.args = parseJsonArgs(options.argsJson, "args-json");
-    if (options.args.length === 0 && options.arg) options.args = options.arg;
+    options.args = await adapterArgs(options);
     if (!options.artifactDir) fail("job requires --artifact-dir", "E_ARGS");
     if (options.suspensionAvailable !== "true" && options.suspensionAvailable !== "false") {
       fail("job requires --suspension-available true|false", "E_ARGS");
+    }
+    const capsuleRole = String(options.role ?? "executor").toLowerCase();
+    if (!Object.hasOwn(ROLE_STATUS_VOCABULARY, capsuleRole)) {
+      fail("job --role must be executor|planner|mechanical (capsule vocabulary). The workflow role planner-2 corresponds to planner", "E_ARGS");
     }
     result = await dispatchProcessJob({
       root: options.root,
@@ -769,7 +789,7 @@ async function cli(argv = process.argv.slice(2)) {
       result: options.result,
       artifactDir: options.artifactDir,
       expectedSession: options.expectedSession,
-      role: options.role,
+      role: capsuleRole,
       jobRecord: options.jobRecord,
       capsule: options.capsule,
       suspensionAvailable: options.suspensionAvailable === "true",
