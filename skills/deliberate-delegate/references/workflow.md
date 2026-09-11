@@ -90,6 +90,12 @@ This document defines the 12 lifecycle rules, operational boundaries, and stop g
   record `suspensionStatus: unavailable` and stop; never silently resume model
   polling. Without explicit host telemetry proving zero Lead sampled turns,
   record `unknown`, not `enforced`.
+- A raw adapter call that may yield back to the Planning Lead is not an
+  acceptable wait path. On Codex, the Lead must use the single-outer-call
+  pattern in [Awaiting and Result Capsules](suspension.md): the outer
+  orchestration call launches `dd-efficiency.mjs job` and drains any returned
+  process session internally until terminal. No Lead message or new Lead tool
+  decision occurs between dispatch and terminal result.
 - The normal path has one initial package dispatch. If review identifies a correctable defect or transport failure occurs, the existing correction and single technical-replay rules remain in force.
 - By default, all operations are file-only within the project workspace directory.
 

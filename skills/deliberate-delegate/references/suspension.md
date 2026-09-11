@@ -76,6 +76,52 @@ The result is one object with `status` (`PASS`, `FAIL`, `REUSED`, `UNKNOWN`, or
 `UNKNOWN` requires reconciliation and is never an implicit retry. A successful
 v0.4 run writes the job record, raw logs/result, and verified result capsule.
 
+## Codex single-call wait path
+
+The Planning Lead must not launch a long delegate with a raw shell call that
+returns a process/session handle to the model. That return samples the Lead
+again and turns later status checks into model-driven polling.
+
+On a Codex host that exposes an outer orchestration call plus nested command and
+session-wait tools, keep the entire dispatch and wait loop inside the outer
+call. Invoke the controller-backed CLI, not the legacy `run` command:
+
+```js
+// One outer orchestration-tool call. Values come from the frozen brief.
+let current = await tools.exec_command({
+  cmd: approvedJobCommand, // node <dd-efficiency.mjs> job ...
+  workdir: approvedProjectRoot,
+  yield_time_ms: 30000,
+  max_output_tokens: 2000
+});
+while (current.session_id !== undefined) {
+  current = await tools.write_stdin({
+    session_id: current.session_id,
+    chars: "",
+    yield_time_ms: 60000,
+    max_output_tokens: 2000
+  });
+}
+text(current.output);
+```
+
+Set the outer call's own yield deadline beyond the authorized job timeout when
+the host permits it. A periodic host notification is allowed only when it does
+not sample the Lead. Do not call `write_stdin` from a later Lead turn, do not
+send narrative waiting updates, and do not start a second adapter attempt.
+
+The `job` command requires an explicit capability decision:
+
+```powershell
+node "$helper" job --root . --adapter "$adapterExecutable" --args-json "$approvedAdapterArgsJson" --result docs/deliberate-delegate/raw/attempt-01/result.json --expected-session "$executorSession" --artifact-dir docs/deliberate-delegate/raw/attempt-01/adapter --suspension-available true
+```
+
+Use `--suspension-available false` when the outer host cannot keep the wait in
+one orchestration call; the controller then writes a stop record and dispatches
+zero workers. The single-call structure prevents intermediate Lead turns, but
+it still records `suspensionStatus: unknown` unless independent host telemetry
+reports `leadModelTurnsBetweenDispatchAndTerminal: 0`.
+
 ## Result capsule contract
 
 `result-capsule.mjs` emits `dd.result-capsule.v1`. A capsule is bounded and

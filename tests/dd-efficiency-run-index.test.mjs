@@ -55,6 +55,34 @@ test('CLI run honors dashed arguments and failure exit status', async () => {
   }
 });
 
+test('CLI job uses the controller path and fails closed when host waiting is unavailable', async () => {
+  const root = await fixture();
+  const success = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0, sessionId: 'fixed' })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--expected-session', 'fixed', '--suspension-available', 'true', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(success.status, 0, success.stderr);
+  const parsed = JSON.parse(success.stdout);
+  assert.equal(parsed.status, 'PASS');
+  assert.equal(parsed.dispatchCount, 1);
+  assert.equal(parsed.suspensionStatus, 'unknown');
+  assert.ok(parsed.capsulePath);
+  const reused = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0, sessionId: 'fixed' })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--expected-session', 'fixed', '--suspension-available', 'true', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(reused.status, 0, reused.stderr);
+  assert.equal(JSON.parse(reused.stdout).status, 'REUSED');
+  assert.equal(await fs.readFile(path.join(root, 'dispatches'), 'utf8'), '1');
+
+  const stoppedRoot = await fixture();
+  const stopped = spawnSync(process.execPath, [helper, 'job', '--root', stoppedRoot, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/stopped', '--suspension-available', 'false', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(stopped.status, 1, stopped.stderr);
+  const stoppedParsed = JSON.parse(stopped.stdout);
+  assert.equal(stoppedParsed.status, 'UNAVAILABLE');
+  assert.equal(stoppedParsed.dispatchCount, 0);
+  await assert.rejects(fs.stat(path.join(stoppedRoot, 'dispatches')));
+
+  const missingFlagRoot = await fixture();
+  const missingFlag = spawnSync(process.execPath, [helper, 'job', '--root', missingFlagRoot, '--adapter', process.execPath, '--args-json', '[]', '--result', 'result.json', '--artifact-dir', 'raw/missing-flag'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(missingFlag.status, 2);
+  assert.match(missingFlag.stderr, /suspension-available/);
+});
+
 test('missing expected session reports unchecked continuity in a non-repository root', async () => {
   const root = await fixture();
   const result = await runAdapter({ root, adapter: process.execPath, args: ['-e', program({ status: 'completed', exitCode: 0 })], result: 'result.json', artifactDir: 'raw/no-session' });

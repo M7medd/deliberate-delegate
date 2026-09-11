@@ -37,6 +37,7 @@ import {
   writeNewFile as coreWriteNewFile,
   writeSummary as coreWriteSummary,
 } from "./lib/lifecycle-core.mjs";
+import { dispatchProcessJob } from "./lib/job-controller.mjs";
 
 const SUMMARY_SCHEMA = "dd-efficiency.summary.v1";
 const SNAPSHOT_SCHEMA = "dd-efficiency.snapshot.v1";
@@ -684,7 +685,7 @@ function parseArgs(argv) {
   const options = {};
   const positionals = [];
   const repeat = new Set(["allow", "exclude", "validator-json", "arg"]);
-  const known = new Set(["root", "out", "baseline", "allow", "exclude", "validator-json", "arg", "validators", "artifact-dir", "timeout-ms", "max-summary-bytes", "adapter", "args-json", "result", "expected-session", "records"]);
+  const known = new Set(["root", "out", "baseline", "allow", "exclude", "validator-json", "arg", "validators", "artifact-dir", "timeout-ms", "max-summary-bytes", "adapter", "args-json", "result", "expected-session", "records", "role", "job-record", "capsule", "suspension-available"]);
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token.startsWith("--")) {
@@ -724,6 +725,10 @@ async function cli(argv = process.argv.slice(2)) {
       "       [--artifact-dir <fresh-relative-dir>] [--timeout-ms <n>]",
       "  run --root <project> --adapter <executable> --args-json <json-array> --result <relative-json>",
       "      [--expected-session <id>] [--artifact-dir <fresh-relative-dir>] [--timeout-ms <n>]",
+      "  job --root <project> --adapter <executable> --args-json <json-array> --result <relative-json>",
+      "      --artifact-dir <fresh-relative-dir> --suspension-available <true|false>",
+      "      [--expected-session <id>] [--role <role>] [--job-record <relative-json>]",
+      "      [--capsule <relative-json>] [--timeout-ms <n>]",
       "  index --root <project> --records <relative-dir> --out <generated-relative-md>",
     ].join("\n") + "\n");
     return 0;
@@ -750,12 +755,33 @@ async function cli(argv = process.argv.slice(2)) {
     options.args = parseJsonArgs(options.argsJson, "args-json");
     if (options.args.length === 0 && options.arg) options.args = options.arg;
     result = await runAdapter(options);
+  } else if (command === "job") {
+    options.args = parseJsonArgs(options.argsJson, "args-json");
+    if (options.args.length === 0 && options.arg) options.args = options.arg;
+    if (!options.artifactDir) fail("job requires --artifact-dir", "E_ARGS");
+    if (options.suspensionAvailable !== "true" && options.suspensionAvailable !== "false") {
+      fail("job requires --suspension-available true|false", "E_ARGS");
+    }
+    result = await dispatchProcessJob({
+      root: options.root,
+      adapter: options.adapter,
+      args: options.args,
+      result: options.result,
+      artifactDir: options.artifactDir,
+      expectedSession: options.expectedSession,
+      role: options.role,
+      jobRecord: options.jobRecord,
+      capsule: options.capsule,
+      suspensionAvailable: options.suspensionAvailable === "true",
+      timeoutMs: options.timeoutMs,
+      maxCapsuleBytes: options.maxSummaryBytes,
+    });
   } else if (command === "index") {
     if (!options.records || !options.out) fail("index requires --records and --out", "E_ARGS");
     result = await buildIndex(options);
   } else fail(`unknown command: ${command}`, "E_ARGS");
   process.stdout.write(`${JSON.stringify(result)}\n`);
-  return result.status === "PASS" ? 0 : 1;
+  return result.status === "PASS" || (command === "job" && result.status === "REUSED") ? 0 : 1;
 }
 
 export {

@@ -69,6 +69,16 @@ back silently to model polling. An awaited Promise or child wait alone records
 `unknown`, not `enforced`; `enforced` requires host telemetry proving zero Lead
 model turns between dispatch and terminal completion.
 
+Before every planner or executor dispatch, select and record a concrete host
+wait path. On Codex, run the adapter through `dd-efficiency.mjs job` inside one
+outer orchestration-tool call; keep every process-session wait inside that same
+call. Do not let a short shell yield return control to the Lead, and do not emit
+Lead-authored progress updates while the delegate is running. Host-side
+notifications that do not sample the Lead are allowed. If the host cannot keep
+the wait inside one orchestration call, treat suspension as unavailable and
+stop before dispatch. Read [Awaiting and Result Capsules](references/suspension.md)
+for the exact Codex pattern and evidence limits.
+
 The v0.4 release provides:
 
 - `scripts/lib/lifecycle-core.mjs` — shared containment, process capture,

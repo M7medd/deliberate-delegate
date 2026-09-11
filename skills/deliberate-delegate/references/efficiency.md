@@ -1,8 +1,10 @@
 # Lead-side efficiency helper
 
 Read this reference before the first applicable check or dispatch in a DD run.
-Choose the optional helper when it is compatible; otherwise record the concrete
-incompatibility and equivalent check coverage in Lead evidence. Requires Node
+Snapshot, gate, and index helpers are optional when an equivalent check exists.
+The controller-backed `job` path is mandatory for Codex-hosted dispatch unless
+the host supplies an equivalent single-call wait; otherwise stop as unavailable.
+Record the concrete incompatibility and equivalent check coverage. Requires Node
 18+ and Git; no packages, daemon, database or provider transport. It reduces
 host/model interactions, not mandatory review. It never approves, retries,
 commits, changes state, replaces role holders or starts another Phase. The exact
@@ -47,7 +49,7 @@ Exclusions/output cannot overlap the allowlist. Existing output directories,
 traversal and owned-path symlink/junction crossings are rejected.
 This is not an adversarial filesystem sandbox or an outside-write detector.
 
-## Legacy CLI `run` versus the v0.4 controller path
+## Controller CLI `job` and legacy `run`
 
 Use the installed adapter's actual executable, argv, immutable brief, permission
 flags and exact resume ID. `$approvedAdapterArgsJson` is a JSON array prepared
@@ -56,6 +58,12 @@ from that adapter's instructions; its result path must match `--result` below.
 ```powershell
 node "$helper" run --root . --adapter "$adapterExecutable" --args-json "$approvedAdapterArgsJson" --result docs/deliberate-delegate/raw/attempt-01/adapter/result.json --expected-session "$executorSession" --artifact-dir docs/deliberate-delegate/raw/attempt-01/adapter/wait
 ```
+
+The CLI `job` command is the normal v0.4 path. It invokes
+`ProcessJobController`, persists the dispatch identity before launch, and emits
+the bounded result capsule. The host must still keep this command inside its
+single-call wait path; a CLI process cannot prevent the host from resampling
+the Lead after a shell yield.
 
 The CLI `run` command is the legacy wait/summary helper. It dispatches once,
 awaits the owned child, streams full logs and returns one legacy summary. It does
