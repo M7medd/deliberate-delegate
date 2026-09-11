@@ -30,6 +30,12 @@ only with explicit host telemetry proving:
 An awaited Promise or owned child-process wait is a mechanism, not proof that
 the host sampled zero Lead turns.
 
+For the pre-inspection Planner 2 experiment sequence, use the
+[deterministic bootstrap](../scripts/dd-bootstrap.md). It uses this same
+`ProcessJobController` path, keeps the controller identity stable, and records
+the usage/capsule/confirmation boundary without introducing a second workflow
+state machine.
+
 ## Runnable controller path
 
 From the repository root, the exported controller can be invoked directly. The

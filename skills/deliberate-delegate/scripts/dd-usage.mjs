@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const SCHEMA = "dd.usage-ledger.v1";
 const ROLES = new Set(["planning-lead", "planner-2", "executor"]);
@@ -48,6 +49,12 @@ remain unknown; the recorder does not estimate them.`;
 function fail(message) {
   process.stderr.write(`dd-usage: ${message}\n`);
   process.exit(2);
+}
+
+function usageError(message, code = "E_USAGE") {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 function parseArgs(argv) {
@@ -122,10 +129,41 @@ function readJsonLines(path) {
   return records;
 }
 
+function readJsonLinesStrict(path) {
+  const records = [];
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    throw usageError(`could not read usage ledger: ${error.message}`, "E_USAGE_READ");
+  }
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    if (!line.trim()) continue;
+    try {
+      records.push(JSON.parse(line));
+    } catch {
+      throw usageError(`usage ledger line ${index + 1} is not valid JSON`, "E_USAGE_LEDGER");
+    }
+  }
+  return records;
+}
+
 function readLedger(path) {
   if (!existsSync(path)) fail(`ledger does not exist: ${path}`);
   const rows = readJsonLines(path);
   if (!rows.length || rows[0].schema !== SCHEMA || rows[0].type !== "experiment_start") fail("invalid usage ledger");
+  return rows;
+}
+
+function readLedgerLibrary(path) {
+  if (!existsSync(path)) throw usageError(`ledger does not exist: ${path}`, "E_USAGE_LEDGER");
+  const rows = readJsonLinesStrict(path);
+  if (!rows.length || rows[0]?.schema !== SCHEMA || rows[0]?.type !== "experiment_start") {
+    throw usageError("invalid usage ledger", "E_USAGE_LEDGER");
+  }
+  if (typeof rows[0].experimentId !== "string" || rows[0].experimentId.length === 0) {
+    throw usageError("usage ledger experiment ID is missing", "E_USAGE_LEDGER");
+  }
   return rows;
 }
 
@@ -167,6 +205,37 @@ function safeLocator(root, value) {
   const canonical = realpathSync(value);
   if (inside(root, canonical)) return relative(root, canonical).replaceAll("\\", "/") || ".";
   return `<outside-root:${sourceKey(canonical).slice(0, 16)}>`;
+}
+
+function sourcePrefix(source, root) {
+  return source.files.map((file) => {
+    const bytes = readFileSync(file);
+    return {
+      locator: safeLocator(root, file),
+      fileKey: sourceKey(file),
+      bytes: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  });
+}
+
+export function usageSourcePrefixMatches(source, root, prefix) {
+  if (!source || !Array.isArray(source.files) || !Array.isArray(prefix) || prefix.length === 0) {
+    return { valid: false, reason: "baseline source-prefix evidence is missing" };
+  }
+  const currentFiles = new Map(source.files.map((file) => [sourceKey(file), file]));
+  for (const entry of prefix) {
+    if (!entry || typeof entry.fileKey !== "string" || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || !/^[a-f0-9]{64}$/i.test(String(entry.sha256 || ""))) {
+      return { valid: false, reason: "baseline source-prefix evidence is malformed" };
+    }
+    const file = currentFiles.get(entry.fileKey);
+    if (!file) return { valid: false, reason: "a baseline source file is missing or was replaced" };
+    const bytes = readFileSync(file);
+    if (bytes.length < entry.bytes) return { valid: false, reason: "the current rollout is shorter than the recorded baseline" };
+    const digest = createHash("sha256").update(bytes.subarray(0, entry.bytes)).digest("hex");
+    if (digest !== entry.sha256) return { valid: false, reason: "the current rollout is not an append-only extension of the recorded baseline" };
+  }
+  return { valid: true };
 }
 
 function sum(values) {
@@ -328,9 +397,9 @@ function parseDelegateRun(events, result) {
   };
 }
 
-function resolveSource(value) {
+function resolveSourceInternal(value, onError) {
   const requested = resolve(value);
-  if (!existsSync(requested)) fail(`source does not exist: ${requested}`);
+  if (!existsSync(requested)) onError(`source does not exist: ${requested}`, "E_USAGE_SOURCE");
   const absolute = realpathSync(requested);
   const sourceStat = statSync(absolute);
   let eventsPath = null;
@@ -349,9 +418,17 @@ function resolveSource(value) {
     const result = join(dirname(absolute), "result.json");
     if (existsSync(result)) resultPath = result;
   }
-  if (!eventsPath) fail("source has no events.jsonl or JSONL event file");
+  if (!eventsPath) onError("source has no events.jsonl or JSONL event file", "E_USAGE_SOURCE");
   const files = [eventsPath, ...(resultPath ? [resultPath] : [])];
   return { requestedPath: absolute, sourceKey: sourceKey(absolute), eventsPath, resultPath, files };
+}
+
+function resolveSource(value) {
+  return resolveSourceInternal(value, (message) => fail(message));
+}
+
+export function resolveUsageSource(value) {
+  return resolveSourceInternal(value, (message, code) => { throw usageError(message, code); });
 }
 
 function parseSource(source) {
@@ -392,22 +469,71 @@ function init(opts, root, ledger) {
   process.stdout.write(`usage ledger initialized: ${ledger}\n`);
 }
 
-function capture(opts, root, ledger) {
-  const rows = readLedger(ledger);
-  const source = resolveSource(opts.source);
-  const digest = sha256Files(source.files);
-  const idempotencyKey = createHash("sha256").update(`${opts.role}\0${source.sourceKey}\0${digest}`).digest("hex");
-  const duplicate = rows.find((row) => row.type === "usage_capture" && row.idempotencyKey === idempotencyKey);
-  if (duplicate) {
-    process.stdout.write(`usage capture already recorded: ${duplicate.captureId}\n`);
-    return;
+export function ensureUsageLedger({ ledgerPath, experimentId, root, createdAt = new Date().toISOString() } = {}) {
+  if (typeof ledgerPath !== "string" || ledgerPath.length === 0) throw usageError("ledgerPath is required", "E_USAGE_ARGS");
+  if (typeof experimentId !== "string" || experimentId.length === 0) throw usageError("experimentId is required", "E_USAGE_ARGS");
+  if (typeof root !== "string" || root.length === 0) throw usageError("root is required", "E_USAGE_ARGS");
+  const makeRecord = () => ({ schema: SCHEMA, type: "experiment_start", experimentId, createdAt, root });
+  if (existsSync(ledgerPath)) {
+    const rows = readLedgerLibrary(ledgerPath);
+    if (rows[0].experimentId !== experimentId) {
+      throw usageError(`ledger experiment ID conflicts with requested experiment: ${rows[0].experimentId}`, "E_EXPERIMENT_CONFLICT");
+    }
+    if (rows[0].root && rows[0].root !== root) {
+      throw usageError("ledger project root conflicts with requested project root", "E_EXPERIMENT_CONFLICT");
+    }
+    return { initialized: false, record: rows[0], rows };
   }
+  mkdirSync(dirname(ledgerPath), { recursive: true });
+  const record = makeRecord();
+  try {
+    writeFileSync(ledgerPath, `${JSON.stringify(record)}\n`, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    const rows = readLedgerLibrary(ledgerPath);
+    if (rows[0].experimentId !== experimentId || (rows[0].root && rows[0].root !== root)) {
+      throw usageError("ledger was initialized by a conflicting experiment", "E_EXPERIMENT_CONFLICT");
+    }
+    return { initialized: false, record: rows[0], rows };
+  }
+  return { initialized: true, record, rows: [record] };
+}
+
+export function readUsageLedger(ledgerPath) {
+  return readLedgerLibrary(ledgerPath);
+}
+
+export function usageSourceDigest(source) {
+  if (!source || !Array.isArray(source.files) || source.files.length === 0) {
+    throw usageError("usage source files are required", "E_USAGE_SOURCE");
+  }
+  return sha256Files(source.files);
+}
+
+export function captureUsage({
+  ledgerPath,
+  root,
+  role,
+  source: sourceValue,
+  label = null,
+  baseline = false,
+  idempotencyNamespace = null,
+  captureKind = null,
+} = {}) {
+  if (!ROLES.has(role)) throw usageError(`unsupported usage role: ${role}`, "E_USAGE_ARGS");
+  if (typeof sourceValue !== "string" || sourceValue.length === 0) throw usageError("source is required", "E_USAGE_ARGS");
+  const rows = readLedgerLibrary(ledgerPath);
+  const source = resolveUsageSource(sourceValue);
+  const digest = usageSourceDigest(source);
+  const namespace = idempotencyNamespace === null ? "" : `\0${String(idempotencyNamespace)}`;
+  const idempotencyKey = createHash("sha256").update(`${role}\0${source.sourceKey}\0${digest}${namespace}`).digest("hex");
+  const duplicate = rows.find((row) => row.type === "usage_capture" && row.idempotencyKey === idempotencyKey);
+  if (duplicate) return { duplicate: true, captureId: duplicate.captureId, record: duplicate, source };
   const parsed = parseSource(source);
-  const previous = [...rows].reverse().find((row) => row.type === "usage_capture" && row.role === opts.role &&
+  const previous = [...rows].reverse().find((row) => row.type === "usage_capture" && row.role === role &&
     row.source?.sourceKey === source.sourceKey && row.source?.kind === parsed.kind);
-  const baseline = Boolean(opts.baseline);
   if (parsed.kind === "codex-rollout" && !baseline && !previous) {
-    fail("first capture of a Codex rollout requires --baseline");
+    throw usageError("first capture of a Codex rollout requires --baseline", "E_USAGE_BASELINE");
   }
   const captureId = `usage-${String(rows.filter((row) => row.type === "usage_capture").length + 1).padStart(4, "0")}`;
   const record = {
@@ -416,9 +542,9 @@ function capture(opts, root, ledger) {
     experimentId: rows[0].experimentId,
     captureId,
     capturedAt: new Date().toISOString(),
-    role: opts.role,
-    label: boundedString(opts.label),
-    baseline,
+    role,
+    label: boundedString(label),
+    baseline: Boolean(baseline),
     status: boundedString(parsed.status, 80),
     sessionId: boundedString(parsed.sessionId),
     threadId: boundedString(parsed.threadId),
@@ -432,14 +558,37 @@ function capture(opts, root, ledger) {
       sha256: digest,
     },
     metrics: parsed.metrics,
-    delta: metricDelta(parsed.metrics, previous?.metrics, baseline),
+    delta: metricDelta(parsed.metrics, previous?.metrics, Boolean(baseline)),
     contextWindowTokens: parsed.contextWindow,
     rateLimits: parsed.rateLimits,
     coverage: coverage(parsed.metrics, parsed.rateLimits),
     idempotencyKey,
   };
-  appendRecord(ledger, record);
-  process.stdout.write(`${JSON.stringify({ captureId, role: opts.role, kind: parsed.kind, delta: record.delta, rateLimits: record.rateLimits, coverage: record.coverage }, null, 2)}\n`);
+  if (baseline) record.source.prefix = sourcePrefix(source, root);
+  if (captureKind !== null) record.captureKind = boundedString(captureKind, 80);
+  appendRecord(ledgerPath, record);
+  return { duplicate: false, captureId, record, source };
+}
+
+function capture(opts, root, ledger) {
+  let result;
+  try {
+    result = captureUsage({
+      ledgerPath: ledger,
+      root,
+      role: opts.role,
+      source: opts.source,
+      label: opts.label,
+      baseline: opts.baseline,
+    });
+  } catch (error) {
+    fail(error.message);
+  }
+  if (result.duplicate) {
+    process.stdout.write(`usage capture already recorded: ${result.captureId}\n`);
+    return;
+  }
+  process.stdout.write(`${JSON.stringify({ captureId: result.captureId, role: opts.role, kind: result.record.source.kind, delta: result.record.delta, rateLimits: result.record.rateLimits, coverage: result.record.coverage }, null, 2)}\n`);
 }
 
 function formatNumber(value) {
@@ -488,9 +637,13 @@ function report(_opts, _root, ledger) {
   }
 }
 
-const opts = parseArgs(process.argv.slice(2));
-const root = canonicalRoot(opts.root);
-const ledger = ledgerPath(root, opts.ledger);
-if (opts.command === "init") init(opts, root, ledger);
-else if (opts.command === "capture") capture(opts, root, ledger);
-else report(opts, root, ledger);
+if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
+  const opts = parseArgs(process.argv.slice(2));
+  const root = canonicalRoot(opts.root);
+  const ledger = ledgerPath(root, opts.ledger);
+  if (opts.command === "init") init(opts, root, ledger);
+  else if (opts.command === "capture") capture(opts, root, ledger);
+  else report(opts, root, ledger);
+}
+
+export { SCHEMA as USAGE_LEDGER_SCHEMA, ROLES as USAGE_ROLES };

@@ -11,6 +11,11 @@ SHA-256 source digests enter the ledger. Paths inside the project are stored
 relative to its root; outside paths are represented by a hashed locator.
 Missing measurements remain `unknown`.
 
+For the initial controlled Planner 2 handshake, use the sibling
+[`dd-bootstrap.mjs` command](dd-bootstrap.md) before project inspection. It
+reuses this recorder in-process and adds the stable controller/capsule and
+Lead-boundary sequencing required for restart-safe evidence.
+
 ## Minimal experiment flow
 
 Initialize before the Planning Lead inspects the project:

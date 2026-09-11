@@ -79,6 +79,11 @@ the wait inside one orchestration call, treat suspension as unavailable and
 stop before dispatch. Read [Awaiting and Result Capsules](references/suspension.md)
 for the exact Codex pattern and evidence limits.
 
+For a controlled Planner 2 handshake before project inspection, use the
+[deterministic bootstrap](scripts/dd-bootstrap.md) and its caller-supplied
+envelope. It performs only the bounded mechanical evidence sequence; all
+planner, human, Phase, and provider gates remain in force.
+
 The v0.4 release provides:
 
 - `scripts/lib/lifecycle-core.mjs` — shared containment, process capture,
