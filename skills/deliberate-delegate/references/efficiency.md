@@ -57,11 +57,17 @@ from that adapter's instructions; its result path must match `--result` below.
 
 ```powershell
 node "$helper" run --root . --adapter "$adapterExecutable" --args-json "$approvedAdapterArgsJson" --result docs/deliberate-delegate/raw/attempt-01/adapter/result.json --expected-session "$executorSession" --artifact-dir docs/deliberate-delegate/raw/attempt-01/adapter/wait
+node "$helper" job --root . --adapter "$adapterExecutable" --adapter-envelope docs/deliberate-delegate/raw/attempt-01/adapter-envelope.json --args-json "$approvedAdapterArgsJson" --result docs/deliberate-delegate/raw/attempt-01/result.json --expected-session "$executorSession" --artifact-dir docs/deliberate-delegate/raw/attempt-01/adapter/wait --suspension-available true
 ```
 
 The CLI `job` command is the normal v0.4 path. It invokes
 `ProcessJobController`, persists the dispatch identity before launch, and emits
-the bounded result capsule. The host must still keep this command inside its
+the bounded result capsule. Every `job` dispatch must also pass
+`--adapter-envelope <project-relative-json>`. The envelope records the
+effective project-relative cwd and either `inherits_process` or a bounded
+`adapter_contract` cwd argument/value match. Its normalized-envelope digest is
+part of `dd.dispatch-identity.v2`; the CLI source-file digest is separate
+evidence and is not identity. The host must still keep this command inside its
 single-call wait path; a CLI process cannot prevent the host from resampling
 the Lead after a shell yield.
 
@@ -74,7 +80,7 @@ artifact directory is created or the provider is launched.
 The CLI `run` command is the legacy wait/summary helper. It dispatches once,
 awaits the owned child, streams full logs and returns one legacy summary. It does
 not create the v0.4 job record or result capsule, enforce deterministic
-idempotency/reconciliation, or prove `suspensionStatus: enforced`. Use the
+idempotency/reconciliation, or emit `suspensionStatus: enforced`. Use the
 exported `ProcessJobController` path documented in [Awaiting and Result
 Capsules](suspension.md) when v0.4 job/capsule evidence is required.
 
@@ -94,7 +100,16 @@ rereads, or approval echoes. If the host cannot suspend the Lead, record
 `suspensionStatus: unavailable` and stop. Do not silently fall back to model
 polling. Without explicit host telemetry showing zero Lead sampled model turns,
 the capsule records `suspensionStatus: unknown`, even when the child wait was
-successful. Only host telemetry can justify `enforced`.
+successful. The `enforced` value is retained only for structural validation of
+legacy raw capsules and is labeled non-attested; current controller and
+capsule-emission APIs cannot create it.
+
+Missing, malformed, contradictory, out-of-root, or reparse-crossing envelopes
+stop a fresh `job` before provider launch by writing a durable
+`STOPPED_INVALID_ENVELOPE` job and `adapter-envelope-stop.v1.json`. A stopped
+artifact directory is reconciled read-only; corrected input requires a fresh
+attempt directory. Adapter cwd matching is declaration/contract evidence, not
+OS attestation.
 
 Without `--expected-session`, `sessionVerification` is `not_requested` and coverage
 explicitly states continuity was not checked. Such a mechanical result cannot

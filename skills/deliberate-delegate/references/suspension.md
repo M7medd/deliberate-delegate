@@ -20,8 +20,9 @@ and exact-session syntax remain in the upstream adapter envelope.
 If the host reports that suspend-and-await is unavailable, the controller stores
 `suspensionStatus: unavailable`, writes a stop record, dispatches zero workers,
 and returns control to the user. There is no silent fallback to model polling.
-When host capability is not known, the default is `unknown`. `enforced` is valid
-only with explicit host telemetry proving:
+When host capability is not known, the default is `unknown`. The `enforced`
+schema value remains readable only for legacy structural validation; current
+controller and capsule-emission APIs reject it, even with:
 
 ```json
 {"leadModelTurnsBetweenDispatchAndTerminal": 0}
@@ -29,12 +30,6 @@ only with explicit host telemetry proving:
 
 An awaited Promise or owned child-process wait is a mechanism, not proof that
 the host sampled zero Lead turns.
-
-For the pre-inspection Planner 2 experiment sequence, use the
-[deterministic bootstrap](../scripts/dd-bootstrap.md). It uses this same
-`ProcessJobController` path, keeps the controller identity stable, and records
-the usage/capsule/confirmation boundary without introducing a second workflow
-state machine.
 
 ## Runnable controller path
 
@@ -48,6 +43,7 @@ import { dispatchProcessJob } from "./skills/deliberate-delegate/scripts/lib/job
 
 const outcome = await dispatchProcessJob({
   root: process.cwd(),
+  adapterEnvelope: { schemaVersion: "dd.adapter-envelope.v1", effectiveWorkingDirectory: ".", cwdMode: "inherits_process", adapterContract: null },
   adapter: process.execPath,
   args: ["-e", "const fs=require('node:fs');fs.writeFileSync('docs/deliberate-delegate/raw/attempt-01/result.v1.json',JSON.stringify({status:'completed',exitCode:0,sessionId:'executor-session-uuid'}));"],
   result: "docs/deliberate-delegate/raw/attempt-01/result.v1.json",
@@ -68,15 +64,19 @@ console.log(JSON.stringify({
 ```
 
 The controller options are: required `root`, executable `adapter`, string
-`args`, project-relative raw `result`, and fresh project-relative `artifactDir`;
-optional `role`, `expectedSession`, `dispatchId`, `idempotencyKey`,
-`suspensionAvailable`, `hostTelemetry`, `timeoutMs`, `changedPaths`, and
-`gateCoverage`. When omitted, `idempotencyKey` is derived deterministically
-from the dispatch identity. Reuse the same artifact directory only to reconcile
-the same identity; changed arguments or paths fail closed.
+`args`, parsed `adapterEnvelope`, project-relative raw `result`, and fresh
+project-relative `artifactDir`; optional `role`, `expectedSession`,
+`dispatchId`, `idempotencyKey`, `suspensionAvailable`, `hostTelemetry`,
+`timeoutMs`, `changedPaths`, and `gateCoverage`. The CLI additionally accepts
+`--adapter-envelope <project-relative-json>` and records that source file's
+digest separately. When omitted, `idempotencyKey` is derived deterministically
+from the v2 dispatch identity. Reuse the same artifact directory only to
+reconcile the same identity; changed arguments, paths, or envelope declarations
+fail closed. An invalid fresh envelope writes a durable stop with zero dispatches
+before any provider launch.
 
-The result is one object with `status` (`PASS`, `FAIL`, `REUSED`, `UNKNOWN`, or
-`UNAVAILABLE`), `dispatchCount`, `dispatchId`, `idempotencyKey`, optional
+The result is one object with `status` (`PASS`, `FAIL`, `REUSED`, `UNKNOWN`,
+`UNAVAILABLE`, or `STOPPED_INVALID_ENVELOPE`), `dispatchCount`, `dispatchId`, `idempotencyKey`, optional
 `capsule`/`capsulePath`, `sessionVerification`, `suspensionStatus`, and
 `failureReasons`. `UNAVAILABLE` records a stop and dispatches zero workers;
 `UNKNOWN` requires reconciliation and is never an implicit retry. A successful
@@ -119,7 +119,7 @@ send narrative waiting updates, and do not start a second adapter attempt.
 The `job` command requires an explicit capability decision:
 
 ```powershell
-node "$helper" job --root . --adapter "$adapterExecutable" --args-json "$approvedAdapterArgsJson" --result docs/deliberate-delegate/raw/attempt-01/result.json --expected-session "$executorSession" --artifact-dir docs/deliberate-delegate/raw/attempt-01/adapter --suspension-available true
+node "$helper" job --root . --adapter "$adapterExecutable" --adapter-envelope docs/deliberate-delegate/raw/attempt-01/adapter-envelope.json --args-json "$approvedAdapterArgsJson" --result docs/deliberate-delegate/raw/attempt-01/result.json --expected-session "$executorSession" --artifact-dir docs/deliberate-delegate/raw/attempt-01/adapter --suspension-available true
 ```
 
 Use `--suspension-available false` when the outer host cannot keep the wait in
@@ -150,13 +150,14 @@ The status vocabulary is intentionally not universal:
 | Role | Allowed status |
 | --- | --- |
 | Executor | `READY_FOR_VERIFICATION`, `FAILED` |
-| Planner | `APPROVE`, `BLOCK`, `NEEDS_EVIDENCE` |
+| Planner | `APPROVE`, `BLOCK`, `NEEDS_EVIDENCE`, `TRANSPORT_FAILED` |
 | Mechanical runner | `PASS`, `FAIL`, `UNKNOWN` |
 
 SHA-256 is an integrity check only when the expected digest is trusted. It is
-not a signature, identity proof, or provenance proof. A missing, malformed, or
-mismatched digest invalidates a terminal capsule. A nonterminal, stale,
-malformed, or session-mismatched result is rejected; it is not approval.
+not a signature, identity proof, or provenance proof. Adapter cwd matching is
+string-level declaration/contract evidence, not OS attestation. A missing,
+malformed, or mismatched digest invalidates a terminal capsule. A nonterminal,
+stale, malformed, or session-mismatched result is rejected; it is not approval.
 
 ## Idempotency and restart recovery
 

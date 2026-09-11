@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,8 @@ const scratch = path.join(source, 'tests/.dd-efficiency-scratch');
 const helper = path.join(source, 'skills/deliberate-delegate/scripts/dd-efficiency.mjs');
 async function fixture() { await fs.mkdir(scratch, { recursive: true }); return fs.mkdtemp(path.join(scratch, 'runner-')); }
 const program = (value, exit = 0) => `require('fs').appendFileSync('dispatches','1'); require('fs').writeFileSync('result.json',${JSON.stringify(typeof value === 'string' ? value : JSON.stringify(value))}); console.log('raw evidence'); process.exit(${exit});`;
+const adapterEnvelope = JSON.stringify({ schemaVersion: 'dd.adapter-envelope.v1', effectiveWorkingDirectory: '.', cwdMode: 'inherits_process', adapterContract: null });
+async function writeAdapterEnvelope(root, content = `${adapterEnvelope}\n`) { await fs.writeFile(path.join(root, 'adapter-envelope.json'), content); return 'adapter-envelope.json'; }
 
 test('AC-5: terminal result, process exit, session, malformed/missing/stale and single dispatch', async () => {
   const cases = [
@@ -57,20 +60,30 @@ test('CLI run honors dashed arguments and failure exit status', async () => {
 
 test('CLI job uses the controller path and fails closed when host waiting is unavailable', async () => {
   const root = await fixture();
-  const success = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0, sessionId: 'fixed' })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--expected-session', 'fixed', '--suspension-available', 'true', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
+  const envelope = await writeAdapterEnvelope(root);
+  const success = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--adapter-envelope', envelope, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0, sessionId: 'fixed' })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--expected-session', 'fixed', '--suspension-available', 'true', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
   assert.equal(success.status, 0, success.stderr);
   const parsed = JSON.parse(success.stdout);
   assert.equal(parsed.status, 'PASS');
   assert.equal(parsed.dispatchCount, 1);
   assert.equal(parsed.suspensionStatus, 'unknown');
   assert.ok(parsed.capsulePath);
-  const reused = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0, sessionId: 'fixed' })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--expected-session', 'fixed', '--suspension-available', 'true', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
+  const envelopeBytes = await fs.readFile(path.join(root, envelope));
+  const sourceDigest = createHash('sha256').update(envelopeBytes).digest('hex');
+  const persistedJob = JSON.parse(await fs.readFile(path.join(root, 'raw/job/job.v1.json'), 'utf8'));
+  const persistedCapsule = JSON.parse(await fs.readFile(path.join(root, 'raw/job/capsule.v1.json'), 'utf8'));
+  assert.equal(persistedJob.adapterEnvelope.sourceFileDigest, sourceDigest);
+  assert.equal(persistedCapsule.adapterEnvelope.sourceFileDigest, sourceDigest);
+  assert.equal(persistedJob.adapterEnvelopeDigest, persistedCapsule.adapterEnvelopeDigest);
+  assert.match(persistedCapsule.adapterEnvelope.limitation, /not OS attestation/);
+  const reused = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--adapter-envelope', envelope, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0, sessionId: 'fixed' })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--expected-session', 'fixed', '--suspension-available', 'true', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
   assert.equal(reused.status, 0, reused.stderr);
   assert.equal(JSON.parse(reused.stdout).status, 'REUSED');
   assert.equal(await fs.readFile(path.join(root, 'dispatches'), 'utf8'), '1');
 
   const stoppedRoot = await fixture();
-  const stopped = spawnSync(process.execPath, [helper, 'job', '--root', stoppedRoot, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/stopped', '--suspension-available', 'false', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
+  const stoppedEnvelope = await writeAdapterEnvelope(stoppedRoot);
+  const stopped = spawnSync(process.execPath, [helper, 'job', '--root', stoppedRoot, '--adapter', process.execPath, '--adapter-envelope', stoppedEnvelope, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/stopped', '--suspension-available', 'false', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
   assert.equal(stopped.status, 1, stopped.stderr);
   const stoppedParsed = JSON.parse(stopped.stdout);
   assert.equal(stoppedParsed.status, 'UNAVAILABLE');
@@ -78,15 +91,52 @@ test('CLI job uses the controller path and fails closed when host waiting is una
   await assert.rejects(fs.stat(path.join(stoppedRoot, 'dispatches')));
 
   const missingFlagRoot = await fixture();
-  const missingFlag = spawnSync(process.execPath, [helper, 'job', '--root', missingFlagRoot, '--adapter', process.execPath, '--args-json', '[]', '--result', 'result.json', '--artifact-dir', 'raw/missing-flag'], { encoding: 'utf8', windowsHide: true });
+  const missingFlagEnvelope = await writeAdapterEnvelope(missingFlagRoot);
+  const missingFlag = spawnSync(process.execPath, [helper, 'job', '--root', missingFlagRoot, '--adapter', process.execPath, '--adapter-envelope', missingFlagEnvelope, '--args-json', '[]', '--result', 'result.json', '--artifact-dir', 'raw/missing-flag'], { encoding: 'utf8', windowsHide: true });
   assert.equal(missingFlag.status, 2);
   assert.match(missingFlag.stderr, /suspension-available/);
+});
+
+test('v4 identity canonicalizes equivalent CLI envelopes while retaining distinct source-file digests', async () => {
+  const equivalent = '{\n  "adapterContract": null,\n  "cwdMode": "inherits_process",\n  "effectiveWorkingDirectory": ".",\n  "schemaVersion": "dd.adapter-envelope.v1"\n}\n';
+  const jobs = [];
+  for (const content of [`${adapterEnvelope}\n`, equivalent]) {
+    const root = await fixture();
+    const envelope = await writeAdapterEnvelope(root, content);
+    const result = spawnSync(process.execPath, [
+      helper, 'job', '--root', root, '--adapter', process.execPath, '--adapter-envelope', envelope,
+      '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0, sessionId: 'fixed' })]),
+      '--result', 'result.json', '--artifact-dir', 'raw/job', '--expected-session', 'fixed',
+      '--suspension-available', 'true', '--timeout-ms', '5000',
+    ], { encoding: 'utf8', windowsHide: true });
+    assert.equal(result.status, 0, result.stderr);
+    const job = JSON.parse(await fs.readFile(path.join(root, 'raw/job/job.v1.json'), 'utf8'));
+    jobs.push({ job, sourceDigest: job.adapterEnvelope.sourceFileDigest });
+    assert.equal(job.dispatchIdentitySchema, 'dd.dispatch-identity.v2');
+    assert.equal(job.adapterEnvelopeDigest, job.adapterEnvelope.normalizedDigest);
+  }
+  assert.notEqual(jobs[0].sourceDigest, jobs[1].sourceDigest);
+  assert.equal(jobs[0].job.adapterEnvelope.normalizedDigest, jobs[1].job.adapterEnvelope.normalizedDigest);
+  assert.equal(jobs[0].job.dispatchIdentityHash, jobs[1].job.dispatchIdentityHash);
+});
+
+test('CLI job without an adapter envelope creates a durable preflight stop', async () => {
+  const root = await fixture();
+  const result = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/missing-envelope', '--suspension-available', 'true', '--timeout-ms', '5000'], { encoding: 'utf8', windowsHide: true });
+  assert.equal(result.status, 1, result.stderr);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.status, 'STOPPED_INVALID_ENVELOPE');
+  assert.equal(parsed.dispatchCount, 0);
+  assert.ok((await fs.stat(path.join(root, 'raw/missing-envelope/adapter-envelope-stop.v1.json'))).isFile());
+  await assert.rejects(fs.stat(path.join(root, 'dispatches')));
+  await assert.rejects(fs.stat(path.join(root, 'result.json')));
 });
 
 test('CLI job rejects invalid capsule roles before dispatch with an actionable mapping', async () => {
   for (const role of ['planner-2', 'planer']) {
     const root = await fixture();
-    const result = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--role', role, '--suspension-available', 'true'], { encoding: 'utf8', windowsHide: true });
+    const envelope = await writeAdapterEnvelope(root);
+    const result = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--adapter-envelope', envelope, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--role', role, '--suspension-available', 'true'], { encoding: 'utf8', windowsHide: true });
     assert.equal(result.status, 2);
     assert.match(result.stderr, /executor\|planner\|mechanical/);
     assert.match(result.stderr, /planner-2 corresponds to planner/);
@@ -106,8 +156,9 @@ test('adapter argv file, JSON, and repeated arguments preserve exact values and 
   ];
   for (const [name, flags] of modes) {
     const root = await fixture();
+    const envelope = await writeAdapterEnvelope(root);
     const argvFlags = await flags(root);
-    const result = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, ...argvFlags, '--result', 'result.json', '--artifact-dir', `raw/${name}`, '--suspension-available', 'true'], { encoding: 'utf8', windowsHide: true });
+    const result = spawnSync(process.execPath, [helper, 'job', '--root', root, '--adapter', process.execPath, '--adapter-envelope', envelope, ...argvFlags, '--result', 'result.json', '--artifact-dir', `raw/${name}`, '--suspension-available', 'true'], { encoding: 'utf8', windowsHide: true });
     assert.equal(result.status, 0, `${name}: ${result.stderr}`);
     assert.deepEqual(JSON.parse(await fs.readFile(path.join(root, 'received.json'), 'utf8')), unusual, name);
   }
@@ -115,7 +166,8 @@ test('adapter argv file, JSON, and repeated arguments preserve exact values and 
 
 test('provider success followed by capsule failure is preserved and never replayed', async () => {
   const root = await fixture();
-  const args = [helper, 'job', '--root', root, '--adapter', process.execPath, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--suspension-available', 'true', '--max-summary-bytes', '512'];
+  const envelope = await writeAdapterEnvelope(root);
+  const args = [helper, 'job', '--root', root, '--adapter', process.execPath, '--adapter-envelope', envelope, '--args-json', JSON.stringify(['-e', program({ status: 'completed', exitCode: 0 })]), '--result', 'result.json', '--artifact-dir', 'raw/job', '--suspension-available', 'true', '--max-summary-bytes', '512'];
   const first = spawnSync(process.execPath, args, { encoding: 'utf8', windowsHide: true });
   assert.equal(first.status, 2);
   assert.match(first.stderr, /E_CAPSULE_LIMIT/);

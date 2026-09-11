@@ -10,6 +10,8 @@ import {
   hashRegularFile,
   realDirectory,
   readOwnedFile,
+  sha256Bytes,
+  stableJson,
   writeNewFile,
 } from "./lifecycle-core.mjs";
 
@@ -18,9 +20,10 @@ export const CAPSULE_DEFAULT_MAX_BYTES = 16 * 1024;
 const PROVIDER_USAGE_MAX_BYTES = 2048;
 export const SUSPENSION_STATUSES = new Set(["enforced", "unavailable", "unknown"]);
 export const SESSION_VERIFICATIONS = new Set(["matched", "mismatch", "not_requested", "unknown"]);
+const CHANGED_PATH_STATUSES = new Set(["complete", "incomplete", "unknown"]);
 export const ROLE_STATUS_VOCABULARY = Object.freeze({
   executor: new Set(["READY_FOR_VERIFICATION", "FAILED"]),
-  planner: new Set(["APPROVE", "BLOCK", "NEEDS_EVIDENCE"]),
+  planner: new Set(["APPROVE", "BLOCK", "NEEDS_EVIDENCE", "TRANSPORT_FAILED"]),
   mechanical: new Set(["PASS", "FAIL", "UNKNOWN"]),
 });
 
@@ -45,15 +48,38 @@ function normalizedRole(role) {
   return value;
 }
 
-function normalizedStatus(role, status, process) {
+function transportAssessment(options, process, result, resultValidation, requestedSessionId, sessionVerification) {
+  const failures = [];
+  if (!process || process.spawnError) failures.push("adapter spawn failed");
+  if (process?.timedOut) failures.push("adapter timeout");
+  if (process?.logDrainTimedOut) failures.push("log drain timed out");
+  if (process?.terminalStatus !== "completed") failures.push(`adapter process status ${process?.terminalStatus ?? "unknown"}`);
+  if (process?.exitCode !== 0) failures.push(`adapter exit code ${process?.exitCode ?? "unknown"}`);
+  if ((options.terminal ?? true) !== true) failures.push("terminal result was not marked terminal");
+  if (!result) failures.push("missing terminal result");
+  if (resultValidation && resultValidation.valid !== true) failures.push(resultValidation.reason || "invalid terminal result");
+  if (result && String(result.terminalStatus ?? "").toLowerCase() !== "completed") failures.push(`provider result status ${result.terminalStatus ?? "unknown"}`);
+  if (result && result.exitCode !== null && result.exitCode !== undefined && result.exitCode !== 0) failures.push(`provider result exit code ${result.exitCode}`);
+  if (requestedSessionId !== null && sessionVerification !== "matched") failures.push(`expected session ${requestedSessionId} was not matched`);
+  return { succeeded: failures.length === 0, failures };
+}
+
+function normalizedStatus(role, status, process, transport) {
   if (status !== undefined && status !== null) {
     const value = String(status).toUpperCase();
     if (!ROLE_STATUS_VOCABULARY[role].has(value)) fail(`invalid ${role} role status: ${status}`, "E_CAPSULE_STATUS");
+    if (role === "planner" && transport.succeeded && value === "TRANSPORT_FAILED") fail("TRANSPORT_FAILED is invalid for a mechanically successful transport", "E_CAPSULE_STATUS");
+    if (role === "planner" && !transport.succeeded && value !== "TRANSPORT_FAILED") fail("mechanically failed planner transport requires TRANSPORT_FAILED", "E_CAPSULE_STATUS");
+    if (role !== "planner" && value === "TRANSPORT_FAILED") fail("TRANSPORT_FAILED is reserved for planner capsules", "E_CAPSULE_STATUS");
+    if (role === "executor" && transport.succeeded && value === "FAILED") fail("successful executor transport cannot emit FAILED", "E_CAPSULE_STATUS");
+    if (role === "executor" && !transport.succeeded && value === "READY_FOR_VERIFICATION") fail("failed executor transport cannot emit READY_FOR_VERIFICATION", "E_CAPSULE_STATUS");
+    if (role === "mechanical" && transport.succeeded && value === "FAIL") fail("successful mechanical transport cannot emit FAIL", "E_CAPSULE_STATUS");
+    if (role === "mechanical" && !transport.succeeded && value === "PASS") fail("failed mechanical transport cannot emit PASS", "E_CAPSULE_STATUS");
     return value;
   }
-  if (role === "mechanical") return process?.exitCode === 0 && process?.terminalStatus === "completed" ? "PASS" : "FAIL";
-  if (role === "executor") return process?.exitCode === 0 && process?.terminalStatus === "completed" ? "READY_FOR_VERIFICATION" : "FAILED";
-  fail("planner capsules require an explicit APPROVE, BLOCK, or NEEDS_EVIDENCE status", "E_CAPSULE_STATUS");
+  if (role === "mechanical") return transport.succeeded ? "PASS" : "FAIL";
+  if (role === "executor") return transport.succeeded ? "READY_FOR_VERIFICATION" : "FAILED";
+  return transport.succeeded ? "NEEDS_EVIDENCE" : "TRANSPORT_FAILED";
 }
 
 function normalizedSuspension(status, evidence, hostTelemetry) {
@@ -63,6 +89,7 @@ function normalizedSuspension(status, evidence, hostTelemetry) {
   if (value === "enforced" && telemetry?.leadModelTurnsBetweenDispatchAndTerminal !== 0) {
     fail("suspensionStatus=enforced requires explicit host telemetry proving zero Lead model turns", "E_SUSPENSION_EVIDENCE");
   }
+  if (value === "enforced") fail("current controller cannot emit enforced suspension; legacy raw capsules are validation-only", "E_SUSPENSION_EMISSION");
   if (value === "unavailable" && evidence === undefined) {
     fail("suspensionStatus=unavailable requires an evidence basis", "E_SUSPENSION_EVIDENCE");
   }
@@ -70,6 +97,90 @@ function normalizedSuspension(status, evidence, hostTelemetry) {
     status: value,
     evidence: clone(evidence) ?? { basis: "host suspension telemetry was not supplied; awaitable wait is not proof of enforcement" },
     hostTelemetry: clone(telemetry) ?? null,
+  };
+}
+
+function normalizedRawLocator(value, fallback) {
+  if (value !== undefined && value !== null && fallback !== undefined && fallback !== null && value !== fallback) {
+    fail("changed-path raw locator declarations contradict each other", "E_CHANGED_PATHS");
+  }
+  const candidate = value ?? fallback ?? null;
+  if (candidate === null) return null;
+  if (typeof candidate !== "string" || candidate.length === 0) fail("changed-path raw locator must be a non-empty project-relative path", "E_CHANGED_PATHS");
+  return assertRelativeInput(candidate, "changed-path raw locator");
+}
+
+function normalizedChangedPaths(value, fallbackRawLocator) {
+  if (value === undefined) {
+    if (fallbackRawLocator !== undefined && fallbackRawLocator !== null) fail("omitted changed-path evidence cannot have a raw locator", "E_CHANGED_PATHS");
+    return { items: [], omittedCount: 0, status: "unknown", complete: null, rawLocator: null };
+  }
+  const holder = Array.isArray(value) ? { items: value } : value;
+  if (!holder || typeof holder !== "object" || !Array.isArray(holder.items)) fail("changedPaths must be an array or an object with an items array", "E_CHANGED_PATHS");
+  const rawLocator = normalizedRawLocator(holder.rawLocator, fallbackRawLocator);
+  const declaredStatus = holder.status;
+  if (declaredStatus !== undefined && !CHANGED_PATH_STATUSES.has(declaredStatus)) fail(`invalid changed-path status: ${declaredStatus}`, "E_CHANGED_PATHS");
+  if (holder.complete !== undefined && typeof holder.complete !== "boolean") fail("changedPaths.complete must be boolean when supplied", "E_CHANGED_PATHS");
+  if (holder.truncated !== undefined && typeof holder.truncated !== "boolean") fail("changedPaths.truncated must be boolean when supplied", "E_CHANGED_PATHS");
+  if (holder.omittedCount !== undefined && (!Number.isInteger(holder.omittedCount) || holder.omittedCount < 0)) fail("changedPaths.omittedCount must be a non-negative integer", "E_CHANGED_PATHS");
+  const bounded = boundedItems(holder.items, rawLocator, 32, 3500);
+  const omittedCount = Math.max(bounded.omittedCount, holder.omittedCount ?? 0);
+  const partialDeclared = holder.complete === false || holder.truncated === true || omittedCount > 0;
+  let status = declaredStatus;
+  if (status === undefined) status = partialDeclared ? "incomplete" : "complete";
+  if (status === "unknown") fail("explicit changed-path evidence cannot be marked unknown; omit the field instead", "E_CHANGED_PATHS");
+  if (status === "complete" && (holder.complete === false || holder.truncated === true || omittedCount > 0)) fail("complete changed-path evidence contradicts partial or omitted items", "E_CHANGED_PATHS");
+  if (status === "incomplete" && rawLocator === null) fail("partial or truncated changed-path evidence requires a raw locator", "E_CHANGED_PATHS");
+  if (status === "incomplete" && holder.complete === true) fail("changedPaths.complete=true contradicts incomplete status", "E_CHANGED_PATHS");
+  if (status === "complete" && holder.complete === false) fail("changedPaths.complete=false contradicts complete status", "E_CHANGED_PATHS");
+  if (status === "complete" && bounded.omittedCount > 0) fail("bounded changed-path evidence requires incomplete status and a raw locator", "E_CHANGED_PATHS");
+  return {
+    items: bounded.items,
+    omittedCount,
+    status,
+    complete: status === "complete" ? true : false,
+    ...(rawLocator !== null ? { rawLocator } : {}),
+  };
+}
+
+function normalizedAdapterEnvelope(value, expectedDigest) {
+  if (value === undefined || value === null) {
+    if (expectedDigest !== undefined && expectedDigest !== null) fail("adapterEnvelopeDigest requires adapter envelope metadata", "E_ADAPTER_ENVELOPE");
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("adapterEnvelope must be an object", "E_ADAPTER_ENVELOPE");
+  if (value.schemaVersion !== "dd.adapter-envelope.v1") fail("adapterEnvelope schemaVersion is invalid", "E_ADAPTER_ENVELOPE");
+  const effectiveWorkingDirectory = assertRelativeInput(value.effectiveWorkingDirectory, "adapter envelope effectiveWorkingDirectory");
+  if (value.cwdMode !== "inherits_process" && value.cwdMode !== "adapter_contract") fail("adapterEnvelope cwdMode is invalid", "E_ADAPTER_ENVELOPE");
+  if (value.cwdMode === "inherits_process" && value.adapterContract !== null) fail("inherits_process adapterEnvelope requires adapterContract=null", "E_ADAPTER_ENVELOPE");
+  if (value.cwdMode === "adapter_contract" && (!value.adapterContract || typeof value.adapterContract !== "object" || Array.isArray(value.adapterContract))) fail("adapter_contract adapterEnvelope requires adapterContract metadata", "E_ADAPTER_ENVELOPE");
+  const base = {
+    schemaVersion: "dd.adapter-envelope.v1",
+    effectiveWorkingDirectory,
+    cwdMode: value.cwdMode,
+    adapterContract: value.adapterContract === null ? null : {
+      adapter: requireText(value.adapterContract.adapter, "adapterContract adapter"),
+      cwdArgument: requireText(value.adapterContract.cwdArgument, "adapterContract cwdArgument"),
+      cwdValue: assertRelativeInput(value.adapterContract.cwdValue, "adapterContract cwdValue"),
+    },
+  };
+  const digest = value.normalizedDigest ?? value.canonicalDigest ?? value.digest ?? expectedDigest ?? null;
+  if (!/^[a-f0-9]{64}$/i.test(String(digest || ""))) fail("adapterEnvelope normalized digest is invalid", "E_ADAPTER_ENVELOPE");
+  if (expectedDigest !== undefined && expectedDigest !== null && digest !== expectedDigest) fail("adapterEnvelopeDigest does not match adapter envelope metadata", "E_ADAPTER_ENVELOPE");
+  const computed = sha256Bytes(stableJson(base));
+  if (computed !== digest) fail("adapterEnvelope normalized digest does not match metadata", "E_ADAPTER_ENVELOPE");
+  const sourceFile = value.sourceFile ?? null;
+  if (sourceFile !== null) assertRelativeInput(sourceFile, "adapter envelope source file");
+  const sourceFileDigest = value.sourceFileDigest ?? null;
+  if (sourceFileDigest !== null && !/^[a-f0-9]{64}$/i.test(String(sourceFileDigest))) fail("adapterEnvelope source-file digest is invalid", "E_ADAPTER_ENVELOPE");
+  return {
+    ...base,
+    normalizedDigest: digest,
+    canonicalDigest: digest,
+    sourceFile,
+    sourceFileDigest,
+    evidence: value.evidence ?? "declaration",
+    limitation: value.limitation ?? "declaration/contract evidence only; argv and adapter cwd behavior are not OS attestation",
   };
 }
 
@@ -137,11 +248,18 @@ function fitCapsule(capsule, maxBytes) {
   capsule.truncation.capsule = true;
   const trim = (collection, keep, countKey) => {
     if (!collection?.items || collection.items.length <= keep) return;
+    if (countKey === "changedPaths" && !collection.rawLocator) {
+      fail("truncated changed-path evidence requires a raw locator", "E_CHANGED_PATHS");
+    }
     const omitted = collection.items.length - keep;
     collection.items = collection.items.slice(0, keep);
     collection.omittedCount += omitted;
     capsule.omittedItemCounts[countKey] = (capsule.omittedItemCounts[countKey] || 0) + omitted;
     capsule.truncation[countKey] = true;
+    if (countKey === "changedPaths") {
+      collection.status = "incomplete";
+      collection.complete = false;
+    }
   };
   const trimCollections = (keep) => {
     trim(capsule.changedPaths, keep, "changedPaths");
@@ -181,6 +299,7 @@ export async function createResultCapsule(options = {}) {
     terminalStatus: String(options.process?.terminalStatus ?? options.processStatus ?? "unknown").toLowerCase(),
     exitCode: options.process?.exitCode ?? options.processExitCode ?? null,
     signal: options.process?.signal ?? null,
+    spawnError: clone(options.process?.spawnError) ?? null,
     timedOut: Boolean(options.process?.timedOut),
     logDrainTimedOut: Boolean(options.process?.logDrainTimedOut),
     processTreeTermination: options.process?.processTreeTermination ?? "unknown",
@@ -197,13 +316,14 @@ export async function createResultCapsule(options = {}) {
   const completedAt = iso(options.completedAt, "completedAt");
   if (Date.parse(completedAt) < Date.parse(createdAt)) fail("completedAt must not precede createdAt", "E_CAPSULE_FIELD");
   const suspension = normalizedSuspension(options.suspensionStatus, options.suspensionEvidence, options.hostTelemetry);
-  const roleStatus = normalizedStatus(role, options.roleStatus, process);
   const requestedSessionId = options.requestedSessionId ?? null;
   if (requestedSessionId !== null && typeof requestedSessionId !== "string") fail("requestedSessionId must be a string or null", "E_CAPSULE_SESSION");
   const observedSessionIds = [...new Set((options.observedSessionIds || []).filter((value) => typeof value === "string" && value.length > 0))];
   const sessionVerification = options.sessionVerification ?? (requestedSessionId === null ? "not_requested" : observedSessionIds.includes(requestedSessionId) ? "matched" : "mismatch");
   if (!SESSION_VERIFICATIONS.has(sessionVerification)) fail(`invalid sessionVerification: ${sessionVerification}`, "E_CAPSULE_SESSION");
   assertSessionVerification(requestedSessionId, observedSessionIds, sessionVerification);
+  const transport = transportAssessment(options, process, resultStatus === null ? null : { terminalStatus: resultStatus, exitCode: resultExitCode }, options.resultValidation, requestedSessionId, sessionVerification);
+  const roleStatus = normalizedStatus(role, options.roleStatus, process, transport);
 
   const rawArtifacts = (options.rawArtifacts || []).map(normalizeRawArtifact);
   if (rawArtifacts.length === 0) fail("at least one raw artifact locator is required", "E_CAPSULE_ARTIFACT");
@@ -216,8 +336,8 @@ export async function createResultCapsule(options = {}) {
     artifactEvidence.push({ ...artifact, sha256: hashed.digest, bytes: hashed.size });
   }
 
-  const changedInput = options.changedPaths ?? [];
-  const changedPaths = normalizedList(changedInput, options.changedPathsRawLocator, 32, 3500);
+  const changedPaths = normalizedChangedPaths(options.changedPaths, options.changedPathsRawLocator);
+  const adapterEnvelope = normalizedAdapterEnvelope(options.adapterEnvelope, options.adapterEnvelopeDigest);
   const gateInput = options.gateCoverage ?? {};
   const gateChecks = normalizedList(gateInput.checks ?? gateInput.items ?? [], gateInput.rawLocator, 32, 3500);
   if (gateInput.complete === true && gateChecks.items.length === 0) {
@@ -232,6 +352,7 @@ export async function createResultCapsule(options = {}) {
     capsuleVersion: 1,
     dispatchId,
     idempotencyKey,
+    dispatchIdentitySchema: options.dispatchIdentitySchema ?? null,
     dispatchIdentityHash,
     createdAt,
     completedAt,
@@ -248,12 +369,16 @@ export async function createResultCapsule(options = {}) {
     resultExitCode,
     result: { terminal: Boolean(terminal), status: resultStatus, exitCode: resultExitCode },
     resultValidation: clone(options.resultValidation) ?? null,
+    transportStatus: transport.succeeded ? "SUCCEEDED" : "FAILED",
+    transportFailureReasons: transport.failures,
     requestedSessionId,
     observedSessionIds,
     sessionVerification,
     suspensionStatus: suspension.status,
     suspensionEvidence: suspension.evidence,
     hostTelemetry: suspension.hostTelemetry,
+    adapterEnvelope,
+    adapterEnvelopeDigest: adapterEnvelope?.normalizedDigest ?? null,
     rawArtifacts: artifactEvidence,
     rawLocators: [...new Set([
       ...artifactEvidence.map((item) => item.locator),
@@ -309,6 +434,30 @@ export async function emitResultCapsule(root, relative, options = {}) {
   return { ...created, capsulePath: capsuleRelative };
 }
 
+function changedPathValidationErrors(value) {
+  const errors = [];
+  if (!value || typeof value !== "object" || Array.isArray(value) || !Array.isArray(value.items)) {
+    return ["changedPaths evidence is missing or malformed"];
+  }
+  const omittedCount = value.omittedCount;
+  if (!Number.isInteger(omittedCount) || omittedCount < 0) errors.push("changedPaths.omittedCount is invalid");
+  const rawLocator = value.rawLocator ?? null;
+  if (rawLocator !== null) {
+    try { assertRelativeInput(rawLocator, "changedPaths raw locator"); } catch (error) { errors.push(error.message); }
+  }
+  const inferredStatus = (omittedCount > 0 || rawLocator !== null && value.complete === false) ? "incomplete" : value.items.length === 0 && value.complete === null ? "unknown" : "complete";
+  const status = value.status ?? inferredStatus;
+  if (!CHANGED_PATH_STATUSES.has(status)) errors.push("changedPaths.status is invalid");
+  if (value.complete !== undefined && value.complete !== null && typeof value.complete !== "boolean") errors.push("changedPaths.complete is invalid");
+  if (status === "unknown" && (value.items.length > 0 || omittedCount !== 0 || rawLocator !== null || value.complete !== null && value.complete !== undefined)) errors.push("unknown changed-path coverage contradicts collected evidence");
+  if (status === "complete" && (omittedCount > 0 || value.complete === false)) errors.push("complete changed-path coverage contradicts omission or completeness");
+  if (status === "incomplete" && rawLocator === null) errors.push("incomplete changed-path coverage requires a raw locator");
+  if (status === "incomplete" && value.complete === true) errors.push("incomplete changed-path coverage contradicts complete=true");
+  if (status === "complete" && value.complete === false) errors.push("complete changed-path coverage contradicts complete=false");
+  if (status === "unknown" && value.complete === true) errors.push("unknown changed-path coverage contradicts complete=true");
+  return errors;
+}
+
 export async function validateResultCapsule(value, options = {}) {
   const errors = [];
   if (!value || typeof value !== "object" || Array.isArray(value)) return { valid: false, errors: ["capsule is not an object"] };
@@ -316,7 +465,17 @@ export async function validateResultCapsule(value, options = {}) {
   if (!Number.isInteger(value.capsuleVersion) || value.capsuleVersion !== 1) errors.push("capsuleVersion is invalid");
   if (typeof value.dispatchId !== "string" || value.dispatchId.length === 0) errors.push("dispatchId is missing");
   if (typeof value.idempotencyKey !== "string" || value.idempotencyKey.length === 0) errors.push("idempotencyKey is missing");
+  if (value.dispatchIdentitySchema !== undefined && value.dispatchIdentitySchema !== null && value.dispatchIdentitySchema !== "dd.dispatch-identity.v2") errors.push("dispatchIdentitySchema is invalid");
   if (!ROLE_STATUS_VOCABULARY[value.role] || !ROLE_STATUS_VOCABULARY[value.role].has(value.roleStatus) || value.status !== value.roleStatus) errors.push("role-scoped status is invalid");
+  if (value.transportStatus !== undefined && value.transportStatus !== null && !new Set(["SUCCEEDED", "FAILED"]).has(value.transportStatus)) errors.push("transportStatus is invalid");
+  if (value.transportStatus === "SUCCEEDED" && value.role === "planner" && value.roleStatus === "TRANSPORT_FAILED") errors.push("successful planner transport cannot be TRANSPORT_FAILED");
+  if (value.transportStatus === "FAILED" && value.role === "planner" && value.roleStatus !== "TRANSPORT_FAILED") errors.push("failed planner transport must be TRANSPORT_FAILED");
+  try {
+    const envelope = normalizedAdapterEnvelope(value.adapterEnvelope, value.adapterEnvelopeDigest);
+    if (envelope && value.adapterEnvelopeDigest !== envelope.normalizedDigest) errors.push("adapterEnvelopeDigest is inconsistent");
+  } catch (error) {
+    errors.push(error.message);
+  }
   if (!SUSPENSION_STATUSES.has(value.suspensionStatus)) errors.push("suspensionStatus is invalid");
   if (!SESSION_VERIFICATIONS.has(value.sessionVerification)) errors.push("sessionVerification is invalid");
   if (value.suspensionStatus === "enforced" && value.hostTelemetry?.leadModelTurnsBetweenDispatchAndTerminal !== 0) errors.push("enforced suspension lacks zero-turn host telemetry");
@@ -347,6 +506,7 @@ export async function validateResultCapsule(value, options = {}) {
   } else if (value.gateCoverage.complete === true && value.gateCoverage.checks.items.length === 0) {
     errors.push("gateCoverage.complete cannot be true with an empty checks list");
   }
+  errors.push(...changedPathValidationErrors(value.changedPaths));
   if (!Array.isArray(value.rawArtifacts) || value.rawArtifacts.length === 0) errors.push("rawArtifacts are missing");
   else {
     const locators = new Set();
@@ -369,7 +529,8 @@ export async function validateResultCapsule(value, options = {}) {
       }
     }
   }
-  return { valid: errors.length === 0, errors, capsule: value };
+  const suspensionAttestation = value.suspensionStatus === "enforced" ? "non-attested" : "not_applicable";
+  return { valid: errors.length === 0, errors, capsule: value, attestation: suspensionAttestation, suspensionAttestation };
 }
 
 export async function loadAndValidateCapsule(root, relative, options = {}) {

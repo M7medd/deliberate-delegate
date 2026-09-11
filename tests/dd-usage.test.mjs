@@ -5,6 +5,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import {
+  captureUsage,
+  ensureUsageLedger,
+  resolveUsageSource,
+  usageSourcePrefixMatches,
+} from "../skills/deliberate-delegate/scripts/dd-usage.mjs";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const cli = path.join(repo, "skills", "deliberate-delegate", "scripts", "dd-usage.mjs");
@@ -83,6 +89,53 @@ test("Codex rollout baseline and later capture record only experiment delta", as
   }
 });
 
+test("growing Codex rollout preserves baseline prefix and records a named boundary", async () => {
+  const root = await fixture();
+  try {
+    const ledgerPath = path.join(root, "usage.jsonl");
+    const rollout = path.join(root, "lead.jsonl");
+    await writeFile(rollout,
+      line({ type: "session_meta", payload: { id: "lead-session" } }) +
+      line({ type: "token_usage_record", payload: { thread_token_usage: {
+        input_tokens: 100, cached_input_tokens: 40, output_tokens: 10, total_tokens: 110,
+      } } }), "utf8");
+
+    ensureUsageLedger({ ledgerPath, experimentId: "exp-prefix", root });
+    const baseline = captureUsage({
+      ledgerPath,
+      root,
+      role: "planning-lead",
+      source: rollout,
+      baseline: true,
+      captureKind: "planning-lead-baseline",
+    });
+    assert.equal(Array.isArray(baseline.record.source.prefix), true);
+    assert.equal(baseline.record.captureKind, "planning-lead-baseline");
+    const baselineDigest = baseline.record.source.sha256;
+
+    await appendFile(rollout,
+      line({ type: "token_usage_record", payload: { thread_token_usage: {
+        input_tokens: 140, cached_input_tokens: 60, output_tokens: 14, total_tokens: 154,
+      } } }), "utf8");
+
+    const source = resolveUsageSource(rollout);
+    assert.deepEqual(usageSourcePrefixMatches(source, root, baseline.record.source.prefix), { valid: true });
+    const boundary = captureUsage({
+      ledgerPath,
+      root,
+      role: "planning-lead",
+      source: rollout,
+      captureKind: "planning-lead-confirmation-boundary",
+    });
+    assert.equal(boundary.record.captureKind, "planning-lead-confirmation-boundary");
+    assert.notEqual(boundary.record.source.sha256, baselineDigest);
+    assert.equal(boundary.record.delta.inputTokens, 40);
+    assert.equal((await rows(ledgerPath)).filter((row) => row.baseline === true).length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("init refuses overwrite and preserves ledger bytes", async () => {
   const root = await fixture();
   try {
@@ -146,6 +199,39 @@ test("Claude capture prefers modelUsage, records rate limits, and counts failure
     assert.equal(captured.metrics.providerCostUsd, 1.6);
     assert.equal(captured.rateLimits.fiveHour.usedPercent, 66);
     assert.equal(captured.rateLimits.sevenDay.usedPercent, 42);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Claude usage cost precedence, zero preservation, init model fallback, and API error mapping", async () => {
+  const root = await fixture();
+  try {
+    const ledger = "usage.jsonl";
+    assert.equal(run(root, ["init", "--root", root, "--ledger", ledger, "--experiment-id", "exp-claude-fields"]).status, 0);
+    const cases = [
+      ["result-cost-zero", { status: "completed", totalCostUsd: 0 }, { type: "result", subtype: "success", total_cost_usd: 9, num_turns: 1 }, 0, "sonnet", 0],
+      ["terminal-cost", { status: "completed" }, { type: "result", subtype: "success", total_cost_usd: 2.5, num_turns: 1 }, 2.5, "haiku", 0],
+      ["itemized-preferred", { status: "completed", totalCostUsd: 88, model: "result-model" }, { type: "result", subtype: "success", total_cost_usd: 99, num_turns: 1, modelUsage: { opus: { inputTokens: 1, outputTokens: 2, costUSD: 1.25 } } }, 1.25, "opus", 0],
+      ["itemized-zero", { status: "completed" }, { type: "result", subtype: "success", total_cost_usd: 9, num_turns: 1, modelUsage: { opus: { inputTokens: 1, outputTokens: 2, costUSD: 0 } } }, 0, "opus", 0],
+      ["api-error", { status: "completed" }, { type: "result", subtype: "success", is_error: true, api_error_status: { status: 529 }, num_turns: 1 }, null, "sonnet", 1],
+      ["unknown-cost", { status: "completed" }, { type: "result", subtype: "success", num_turns: 1 }, null, "sonnet", 0],
+    ];
+    for (const [name, result, terminal, expectedCost, expectedModel, expectedFailures] of cases) {
+      const runDir = path.join(root, name);
+      await mkdir(runDir);
+      await writeFile(path.join(runDir, "result.json"), JSON.stringify(result));
+      await writeFile(path.join(runDir, "events.jsonl"),
+        line({ type: "system", subtype: "init", model: expectedModel }) + line(terminal), "utf8");
+      const captured = run(root, ["capture", "--root", root, "--ledger", ledger, "--role", "planner-2", "--source", runDir, "--label", name]);
+      assert.equal(captured.status, 0, `${name}: ${captured.stderr}`);
+    }
+    const captures = (await rows(path.join(root, ledger))).slice(1);
+    for (const [index, [, , , expectedCost, expectedModel, expectedFailures]] of cases.entries()) {
+      assert.equal(captures[index].metrics.providerCostUsd, expectedCost, cases[index][0]);
+      assert.equal(captures[index].model, expectedModel, cases[index][0]);
+      assert.equal(captures[index].metrics.failedCalls, expectedFailures, cases[index][0]);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

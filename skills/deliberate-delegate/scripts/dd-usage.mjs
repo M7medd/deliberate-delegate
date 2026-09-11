@@ -243,6 +243,10 @@ function sum(values) {
   return measured.length ? measured.reduce((total, value) => total + value, 0) : null;
 }
 
+function firstMeasured(values) {
+  return values.map(n).find((value) => value !== null) ?? null;
+}
+
 function normalizedMetrics(value = {}) {
   return {
     calls: n(value.calls),
@@ -257,7 +261,7 @@ function normalizedMetrics(value = {}) {
     outputTokens: n(value.outputTokens ?? value.output_tokens),
     reasoningOutputTokens: n(value.reasoningOutputTokens ?? value.reasoning_output_tokens),
     totalTokens: n(value.totalTokens ?? value.total_tokens),
-    providerCostUsd: n(value.providerCostUsd ?? value.costUSD ?? value.total_cost_usd),
+    providerCostUsd: n(value.providerCostUsd ?? value.costUSD ?? value.totalCostUsd ?? value.total_cost_usd),
   };
 }
 
@@ -326,6 +330,8 @@ function parseClaudeRun(events, result) {
   const modelUsage = terminal?.modelUsage && typeof terminal.modelUsage === "object" ? Object.values(terminal.modelUsage) : [];
   let usage;
   let models = [];
+  const itemizedCost = modelUsage.length ? sum(modelUsage.map((item) => item?.costUSD)) : null;
+  const fallbackCost = firstMeasured([result?.totalCostUsd, terminal?.total_cost_usd]);
   if (modelUsage.length) {
     models = Object.keys(terminal.modelUsage);
     usage = {
@@ -334,14 +340,18 @@ function parseClaudeRun(events, result) {
       cacheReadInputTokens: sum(modelUsage.map((item) => item.cacheReadInputTokens)),
       outputTokens: sum(modelUsage.map((item) => item.outputTokens)),
       reasoningOutputTokens: sum(modelUsage.map((item) => item.thinkingTokens)),
-      providerCostUsd: sum(modelUsage.map((item) => item.costUSD)),
+      providerCostUsd: itemizedCost ?? fallbackCost,
     };
   } else {
-    usage = terminal?.usage ?? result?.usage ?? {};
+    usage = { ...(terminal?.usage ?? result?.usage ?? {}) };
+    if (usage.providerCostUsd === undefined && usage.costUSD === undefined && usage.totalCostUsd === undefined && usage.total_cost_usd === undefined) {
+      usage.totalCostUsd = fallbackCost;
+    }
   }
   const toolCalls = events.reduce((count, event) => count + (event?.type === "assistant" && Array.isArray(event.message?.content)
     ? event.message.content.filter((item) => item?.type === "tool_use").length : 0), 0);
-  const failed = result?.status ? result.status !== "completed" : Boolean(terminal?.is_error || terminal?.subtype !== "success");
+  const terminalError = terminal?.is_error === true || Boolean(terminal?.api_error_status) || (terminal !== null && terminal.subtype !== undefined && terminal.subtype !== "success");
+  const failed = result?.status ? result.status !== "completed" || terminalError : terminalError;
   const input = n(usage.inputTokens ?? usage.input_tokens);
   const cacheCreation = n(usage.cacheCreationInputTokens ?? usage.cache_creation_input_tokens);
   const cacheRead = n(usage.cacheReadInputTokens ?? usage.cache_read_input_tokens);
@@ -362,7 +372,7 @@ function parseClaudeRun(events, result) {
     contextWindow: modelUsage.length ? Math.max(...modelUsage.map((item) => n(item.contextWindow) ?? 0)) || null : null,
     sessionId: terminal?.session_id ?? result?.sessionId ?? null,
     threadId: null,
-    model: models.length ? models.join(",") : result?.model ?? null,
+    model: models.length ? models.join(",") : result?.model ?? events.find((event) => event?.type === "system" && event?.subtype === "init" && typeof event.model === "string")?.model ?? null,
     status: result?.status ?? (failed ? "failed" : "completed"),
   };
 }

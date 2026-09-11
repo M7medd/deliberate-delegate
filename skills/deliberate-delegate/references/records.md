@@ -182,6 +182,7 @@ Keeping `phaseState` separate from `stepState` prevents a restart from dispatchi
 ### Key Field Contracts
 
 - `executionProfile`: Records the actual non-secret dispatch envelope: adapter, model label, effort, exact-session resume mode, timeout, optional budget metadata if any, permission profile, declared `noCommit` mode (`transport_enforced`, `tool_guarded`, or `instruction_only`), non-secret provider flags, brief-contract version, safety-policy identifier, and `outsideRuntimePathsDeclared`. It also records the selected `waitPath` (`single_outer_call`, an explicitly described equivalent, or `unavailable`) and whether suspension availability was asserted before dispatch. The envelope may adapt transport mechanics but must never change the canonical brief's objective, scope, acceptance criteria, verification procedures, safety capsule, or result contract. A budget entry records an actual inherited or user-specified limit; it is not an automatic dollar cap.
+- A persisted controlled job/capsule also records a normalized `dd.adapter-envelope.v1`: the project-relative `effectiveWorkingDirectory`, `cwdMode` (`inherits_process` or `adapter_contract`), bounded adapter contract metadata when applicable, its canonical/normalized SHA-256 digest, and the CLI envelope source-file digest when a project-relative JSON file supplied it. The source-file digest is evidence only and is not part of `dd.dispatch-identity.v2`; direct library declarations have no source-file digest. Envelope and argv matching are declaration/contract evidence, not OS attestation, and unknown or unmodelled cwd mechanisms remain unverifiable.
 - `contextManagement`: A non-authoritative evidence envelope. When Claude is Planner 2, record role/provider, required automatic mode, requested `--autocompact 400k` setting, capability classification (`adapter_flag`, `provider_native_auto`, `provider_native_manual`, or `unsupported`), evidence of the effective setting for the current launch/resume, and a `verified` preflight result before every substantive call. A prior launch or session ID is not evidence that the setting persists. If the setting cannot be passed or verified, record `unsupported` and stop before the call. Manual recovery records its concrete trigger, method, and result and is allowed only after automatic compaction fails or a context problem is observed; it is never scheduled routinely. Unknown provider metrics remain `unknown`. Context occupancy and compaction are separate from five-hour subscription usage or quota.
 - `outsideRuntimePathsDeclared`: List of paths created or updated outside the workspace root as reported by the executor. This is an executor declaration/claim, not independent proof. Under Option A2, every path must belong to the exact authorized role session for the Work Package, remain inside the provider's documented session/scratch/cache area, and contain runtime/session transport state only. Any undeclared or unauthorized outside write, or any outside-root deletion without direct action-specific user approval, constitutes a mechanical gate failure.
 - `correctionAttempt`: Integer from `0` through the Phase-configured
@@ -192,13 +193,21 @@ Keeping `phaseState` separate from `stepState` prevents a restart from dispatchi
 
 ### Job and capsule recovery
 
-Persist the job identity and idempotency key before dispatch. A verified
-terminal capsule is reusable evidence for the same key and must not rerun the
-worker. A job record without a verified terminal capsule is `UNKNOWN` after a
-restart until reconciled; it is never assumed successful and is never safely
-retried while the prior process may still write. A raw result without its
-matching job/capsule record is stale. The capsule records raw locators and
-SHA-256 integrity digests, but a digest is not a signature or provenance proof.
+Persist the job identity and idempotency key before dispatch. Controlled jobs
+use `dd.dispatch-identity.v2`, which binds the canonical normalized-envelope
+digest and does not bind a CLI source-file digest. A fresh invalid envelope
+preflight writes `state: STOPPED_INVALID_ENVELOPE`, the stable raw request
+digest, and `adapter-envelope-stop.v1.json`; it emits no provider result or
+capsule and dispatches zero workers. Reusing that directory is read-only and
+returns the preserved stop only for the same raw request identity. A legacy v1
+job is preserved byte-for-byte but cannot be reused because its cwd identity was
+never recorded. A verified terminal capsule is reusable evidence for the same
+key and must not rerun the worker. A job record without a verified terminal
+capsule is `UNKNOWN` after a restart until reconciled; it is never assumed
+successful and is never safely retried while the prior process may still write.
+A raw result without its matching job/capsule record is stale. The capsule
+records raw locators and SHA-256 integrity digests, but a digest is not a
+signature or provenance proof.
 
 ### Security and Secret Invariant
 `state.json` and all Markdown records must **never** store passwords, API keys, tokens, auth cookies, credentials, or private configuration secrets.

@@ -2,7 +2,13 @@
 
 > Human-gated multi-agent coordination layer for dual-planner deliberation and delegated execution.
 
-**Current release:** `0.4.2`
+**Current release:** `0.5.0`
+
+Version 0.5.0 hardens the runtime foundation with required project-relative
+adapter envelopes, fail-closed cwd validation, normalized dispatch identity,
+transport-aware planner results, bounded result capsules, and removal of the
+experimental Planner 2 initialization route that did not demonstrate useful
+consumption savings.
 
 Version 0.4.2 adds a dependency-free, append-only usage recorder for controlled
 experiments. It captures exact Codex rollout and delegate-run sources, prefers
@@ -20,6 +26,22 @@ shared lifecycle mechanics. It does not claim token, cost, quota, or universal
 suspension savings without a controlled host-telemetry pilot. See [awaiting and
 capsules](skills/deliberate-delegate/references/suspension.md) and [usage and
 limits](skills/deliberate-delegate/references/efficiency.md).
+
+## Runtime foundation
+
+Version 0.5.0 requires `dd.adapter-envelope.v1`, uses a project-relative
+effective cwd, fails closed
+when cwd mechanisms are unknown or undeclared, and binds dispatch through
+`dd.dispatch-identity.v2`. Planner verdicts are `APPROVE`, `BLOCK`, or
+`NEEDS_EVIDENCE`; `TRANSPORT_FAILED` is a controller transport result, not a
+planner verdict.
+
+The current controller and result-capsule path cannot emit
+`suspensionStatus: enforced`; `enforced` is readable only for legacy structural
+validation and is explicitly non-attested. The former deterministic Planner 2
+initialization route was removed after the measured experiment did not
+demonstrate useful consumption savings. That result is mechanical evidence only,
+not a causal explanation or a universal inefficiency claim.
 
 **Repository:** https://github.com/M7medd/deliberate-delegate
 
@@ -98,7 +120,7 @@ and technical-retry limits retained.
 2. **Direct Human Phase Authorization:** The human user reviews the Phase plan and explicitly authorizes execution with clear scope boundaries.
 3. **Phase Branch Creation:** The Planning Lead initializes a dedicated Git Phase branch.
 4. **Pre-Work-Package Review & Briefing:** The Lead records the risk tier and owns routine-package completeness; Planner 2 joins the structured pre-review for `reviewed` packages and independent-first deliberation for `deliberate` packages. The Lead then records the immutable brief (`brief.v1.md`) under the applicable gate.
-5. **Delegated Execution:** The Planning Lead dispatches the brief once to the Work Package-scoped executor via the configured adapter and awaits the owned terminal process/result condition without model-driven polling. On Codex, the adapter and all process-session waits stay inside one outer orchestration-tool call; a raw shell call that yields back to the Lead is not an acceptable wait path. Suspension is `unknown` unless host telemetry proves `enforced`; unavailable suspension stops without fallback.
+5. **Delegated Execution:** The Planning Lead dispatches the brief once to the Work Package-scoped executor via the configured adapter and awaits the owned terminal process/result condition without model-driven polling. On Codex, the adapter and all process-session waits stay inside one outer orchestration-tool call; a raw shell call that yields back to the Lead is not an acceptable wait path. Current controller/capsule APIs emit only `unknown` or `unavailable`; legacy `enforced` records are structurally readable but non-attested, and unavailable suspension stops without fallback.
 6. **Lead Mechanical Verification:** The Lead independently inspects raw execution output, full Git status (including untracked and staged files), allowlist adherence, and runs local tests/linters.
 7. **Independent Dual Review:** Both planners independently review the relevant file diff and checks for the Work Package against its acceptance criteria; both must explicitly approve to proceed.
 8. **Checkpoint or Correction:**
@@ -173,7 +195,7 @@ The following capabilities remain deferred from the `0.4` series:
 
 ## Disclaimer
 
-Local verification (Git and Node, no packages or model calls):
+Release verification (Node, no packages or model calls):
 
 ```powershell
 node --test tests/dd-efficiency.test.mjs tests/dd-efficiency-run-index.test.mjs tests/dd-v04.test.mjs tests/dd-usage.test.mjs
@@ -182,9 +204,13 @@ node tests/dd-efficiency-benchmark.mjs
 
 Fixtures stay in ignored `tests/.dd-efficiency-scratch/`, `tests/.dd-v04-scratch/`,
 and `tests/.dd-usage-scratch/`, never live projects.
+Release verification recorded 43 tests, 42
+passes, 1 expected Windows descendant-pipe skip, and 0 failures. `quick_validate.py`
+was `NOT_RUN` because no Python interpreter was available.
 The benchmark compares identical synthetic checks including failures. Host calls
-and visible bytes are not proof of actual token/quota savings; a live A/B is needed.
+and visible bytes are not proof of token, quota, cost, or end-to-end savings; a
+live A/B with host telemetry is needed.
 
-This is a `0.4.2` specification, instruction skill, and optional mechanical
-helper. It is not production-proven, warranted for reliability, or endorsed by
+This is the `0.5.0` specification, instruction skill, and optional mechanical
+runtime. It is not production-proven, warranted for reliability, or endorsed by
 upstream tool authors.

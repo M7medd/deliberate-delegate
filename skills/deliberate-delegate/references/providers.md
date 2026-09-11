@@ -52,6 +52,21 @@ Deliberate Delegate coordinates multi-agent planning and relies on upstream `*-d
 
    *Verification Invariant:* The declared enforcement level informs risk assessment only. Planning Lead must always independently verify Git HEAD, index, branch, and full status before accepting any Step.
 
+7. **Adapter Working-Directory Envelope:**
+   Every controlled `job` dispatch supplies a project-relative
+   `dd.adapter-envelope.v1` with an effective working directory. With
+   `cwdMode: inherits_process`, `adapterContract` is `null` and the adapter is
+   declared to use the controller-pinned process cwd. With
+   `cwdMode: adapter_contract`, bounded metadata names the adapter plus its cwd
+   argument and value, and the value must match the argv supplied to the
+   controller. Duplicate, contradictory, missing, out-of-root, or reparse-
+   crossing declarations stop before provider launch. This is string-level
+   declaration/contract evidence only: it cannot detect cwd obtained from
+   environment, configuration, provider internals, or an unmodelled argument,
+   and it is not OS attestation. The normalized envelope digest binds
+   `dd.dispatch-identity.v2`; a CLI source-file digest is separate evidence and
+   is not part of identity.
+
 ---
 
 ## Context Continuity
@@ -60,7 +75,9 @@ Deliberate Delegate coordinates multi-agent planning and relies on upstream `*-d
 - When Claude is Planner 2, automatic compaction is a preflight invariant, not a recommendation. Every substantive launch or exact-session resume must include an effective `--autocompact 400k` setting. The Lead verifies the actual launch envelope or provider-reported effective setting before the call and records the evidence; an earlier launch or session ID does not prove the setting persists.
 - The 400k setting is the chosen automatic-compaction boundary for a 1,000,000-token Claude window. The earlier 40% observation motivated the value, but the Lead does not manually compact on a 40% schedule.
 - In the tested environment, the bounded observation is: Windows, Claude Code `2.1.267`, observed `2026-09-10`; an in-place provider-native compact reported `56.4k/400k (14%)` afterward. This is one observation, not a benchmark or guarantee.
-- The installed `claude-delegate` `0.5.0` adapter does not expose or enforce `--autocompact`. Invoking Claude Planner 2 through that adapter alone therefore cannot satisfy the automatic-compaction preflight and must be recorded as `unsupported`; stop before the substantive call unless another verified adapter or provider-native automatic launch mechanism supplies the setting. This repository does not vendor or modify upstream adapter files.
+- In the locally verified installed/fork-derived `claude-delegate` adapter, the relay interface accepts `--autocompact <auto|tokens>` on new and resumed Claude launches and records the requested value in its result artifact. This proves the requested launch argument and evidence record only; it does not prove provider-side application or enforcement.
+- Metadata version `0.5.0` alone is not sufficient proof: locally patched or fork-derived builds may retain that metadata version. Each environment must verify current relay help and the actual dispatch/result evidence; this snapshot does not imply the capability is present in every upstream installation.
+- If the active adapter cannot pass and record the required setting, classify it as `unsupported` and stop before a substantive Claude Planner 2 call. This repository does not vendor or modify upstream adapter files.
 - Manual provider-native compaction is recovery only. It is permitted in the exact same session after automatic compaction actually fails or when a concrete context problem appears. Record the trigger, method, and result. Do not use manual compaction merely because a new review, Step, or Work Package is starting, and do not use it as a routine substitute for an adapter that cannot enable the required automatic setting.
 - The automatic preflight in this version is mandatory specifically when Claude is Planner 2. Other Claude roles may adopt the same setting, but are not covered by this role-specific invariant unless the Phase policy says so.
 - Codex native auto-compaction remains provider-managed and does not require a Phase stop.

@@ -37,7 +37,7 @@ import {
   writeNewFile as coreWriteNewFile,
   writeSummary as coreWriteSummary,
 } from "./lib/lifecycle-core.mjs";
-import { dispatchProcessJob } from "./lib/job-controller.mjs";
+import { dispatchProcessJob, loadAdapterEnvelopeFile } from "./lib/job-controller.mjs";
 import { ROLE_STATUS_VOCABULARY } from "./lib/result-capsule.mjs";
 
 const SUMMARY_SCHEMA = "dd-efficiency.summary.v1";
@@ -686,7 +686,7 @@ function parseArgs(argv) {
   const options = {};
   const positionals = [];
   const repeat = new Set(["allow", "exclude", "validator-json", "arg"]);
-  const known = new Set(["root", "out", "baseline", "allow", "exclude", "validator-json", "arg", "validators", "artifact-dir", "timeout-ms", "max-summary-bytes", "adapter", "args-json", "args-file", "result", "expected-session", "records", "role", "job-record", "capsule", "suspension-available"]);
+  const known = new Set(["root", "out", "baseline", "allow", "exclude", "validator-json", "arg", "validators", "artifact-dir", "timeout-ms", "max-summary-bytes", "adapter", "adapter-envelope", "args-json", "args-file", "result", "expected-session", "records", "role", "job-record", "capsule", "suspension-available"]);
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (!token.startsWith("--")) {
@@ -697,7 +697,7 @@ function parseArgs(argv) {
     const equals = raw.indexOf("=");
     const rawKey = equals >= 0 ? raw.slice(0, equals) : raw;
     if (!known.has(rawKey)) fail(`unknown option --${rawKey}`, "E_ARGS");
-    const key = rawKey === "validators" ? "validatorsFile" : rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+    const key = rawKey === "validators" ? "validatorsFile" : rawKey === "adapter-envelope" ? "adapterEnvelopeFile" : rawKey.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
     const value = equals >= 0 ? raw.slice(equals + 1) : argv[++index];
     if (value === undefined) fail(`missing value for --${key}`, "E_ARGS");
     if (repeat.has(rawKey)) {
@@ -745,6 +745,7 @@ async function cli(argv = process.argv.slice(2)) {
       "      [--expected-session <id>] [--artifact-dir <fresh-relative-dir>] [--timeout-ms <n>]",
       "  job --root <project> --adapter <executable> [--args-json <json-array> | --args-file <relative-json> | --arg <value>...] --result <relative-json>",
       "      --artifact-dir <fresh-relative-dir> --suspension-available <true|false>",
+      "      --adapter-envelope <relative-json>",
       "      [--expected-session <id>] [--role <role>] [--job-record <relative-json>]",
       "      [--capsule <relative-json>] [--timeout-ms <n>]",
       "  index --root <project> --records <relative-dir> --out <generated-relative-md>",
@@ -782,6 +783,9 @@ async function cli(argv = process.argv.slice(2)) {
     if (!Object.hasOwn(ROLE_STATUS_VOCABULARY, capsuleRole)) {
       fail("job --role must be executor|planner|mechanical (capsule vocabulary). The workflow role planner-2 corresponds to planner", "E_ARGS");
     }
+    const envelopeSource = options.adapterEnvelopeFile === undefined
+      ? { adapterEnvelope: null, sourceFile: null, sourceFileDigest: null, sourceError: "--adapter-envelope is required" }
+      : await loadAdapterEnvelopeFile(options.root, options.adapterEnvelopeFile);
     result = await dispatchProcessJob({
       root: options.root,
       adapter: options.adapter,
@@ -792,6 +796,10 @@ async function cli(argv = process.argv.slice(2)) {
       role: capsuleRole,
       jobRecord: options.jobRecord,
       capsule: options.capsule,
+      adapterEnvelope: envelopeSource.adapterEnvelope,
+      adapterEnvelopeSourceFile: envelopeSource.sourceFile,
+      adapterEnvelopeSourceDigest: envelopeSource.sourceFileDigest,
+      adapterEnvelopeSourceError: envelopeSource.sourceError,
       suspensionAvailable: options.suspensionAvailable === "true",
       timeoutMs: options.timeoutMs,
       maxCapsuleBytes: options.maxSummaryBytes,

@@ -3,7 +3,7 @@ name: deliberate-delegate
 description: Human-gated multi-agent coordination with durable project records, risk-sensitive planner review, awaitable Work Package execution, independent dual review, and bounded recovery.
 license: MIT
 metadata:
-  version: 0.4.2
+  version: 0.5.0
 ---
 
 # Deliberate Delegate
@@ -66,11 +66,14 @@ condition. The normal path contains no model-driven polling, repeated status
 prompts, transcript rereads, or approval echoes. If the host cannot suspend the
 Lead while waiting, record `suspensionStatus: unavailable` and stop; never fall
 back silently to model polling. An awaited Promise or child wait alone records
-`unknown`, not `enforced`; `enforced` requires host telemetry proving zero Lead
-model turns between dispatch and terminal completion.
+`unknown`, not `enforced`. The `enforced` value remains readable for legacy
+records, but no current controller or capsule-emission API may create it;
+legacy structural validation is explicitly non-attested.
 
 Before every planner or executor dispatch, select and record a concrete host
-wait path. On Codex, run the adapter through `dd-efficiency.mjs job` inside one
+wait path and a valid `dd.adapter-envelope.v1`. The envelope binds the
+effective project-relative working directory and either declares
+`inherits_process` or a bounded adapter cwd argument/value contract. On Codex, run the adapter through `dd-efficiency.mjs job` inside one
 outer orchestration-tool call; keep every process-session wait inside that same
 call. Do not let a short shell yield return control to the Lead, and do not emit
 Lead-authored progress updates while the delegate is running. Host-side
@@ -79,12 +82,7 @@ the wait inside one orchestration call, treat suspension as unavailable and
 stop before dispatch. Read [Awaiting and Result Capsules](references/suspension.md)
 for the exact Codex pattern and evidence limits.
 
-For a controlled Planner 2 handshake before project inspection, use the
-[deterministic bootstrap](scripts/dd-bootstrap.md) and its caller-supplied
-envelope. It performs only the bounded mechanical evidence sequence; all
-planner, human, Phase, and provider gates remain in force.
-
-The v0.4 release provides:
+The runtime foundation provides:
 
 - `scripts/lib/lifecycle-core.mjs` — shared containment, process capture,
   bounded drain, validation, session mapping, summaries, and correction policy;
@@ -93,11 +91,15 @@ The v0.4 release provides:
   and explicit timeout/process-tree limits;
 - `scripts/lib/result-capsule.mjs` — bounded machine-readable capsules with raw
   locators, SHA-256 integrity digests, session/suspension evidence, gate
-  coverage, truncation disclosure, and role-scoped status vocabulary.
+  coverage, truncation disclosure, adapter-envelope declaration evidence, and
+  role-scoped status vocabulary. Planner capsules additionally use
+  `TRANSPORT_FAILED`; agent self-reports use only substantive planner verdicts.
 
 SHA-256 is an integrity check only when the expected digest is trusted. It is
-not a signature, identity proof, or provenance proof. Provider usage is recorded
-only when the provider reports it; DD invents no cost, quota, or token claim.
+not a signature, identity proof, or provenance proof. Adapter cwd matching is
+string-level declaration/contract evidence, not OS attestation. Provider usage
+is recorded only when the provider reports it; DD invents no cost, quota, or
+token claim.
 
 For a user-authorized usage experiment, initialize the usage ledger before the
 Lead's first project inspection, take a zero-delta Lead baseline, and capture
@@ -108,7 +110,7 @@ to reconstruct consumption from memory or load transcripts to calculate it.
 ## Correction and recovery boundaries
 
 The Phase configures the correction policy. The backward-compatible default is
-two correction attempts; the absolute v0.4 ceiling is three. An executor
+two correction attempts; the absolute ceiling is three. An executor
 cannot raise it. A no-progress attempt with the same blocking defects and no
 new relevant evidence stops immediately. A restart treats uncertain work as
 `UNKNOWN` until reconciled; a known terminal result is reused without rerunning.

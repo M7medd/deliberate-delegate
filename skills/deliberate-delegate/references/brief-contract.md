@@ -27,6 +27,10 @@ pre-review; `reviewed` requires one structured Planner 2 verdict; and
 `deliberate` requires independent-first bounded deliberation. Planner 2 may
 escalate the tier unilaterally. A downgrade requires both planners and an
 immutable record. All tiers require independent Lead + Planner 2 post-review.
+Planner self-reports use only `APPROVE | BLOCK | NEEDS_EVIDENCE`; the mechanical
+capsule may additionally report `TRANSPORT_FAILED` for planner transport
+failure. Transport failure is not a substantive verdict and never authorizes a
+retry or role replacement.
 
 Add these fields only when their trigger applies:
 
