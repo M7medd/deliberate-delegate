@@ -21,6 +21,11 @@ const PROVIDER_USAGE_MAX_BYTES = 2048;
 export const SUSPENSION_STATUSES = new Set(["enforced", "unavailable", "unknown"]);
 export const SESSION_VERIFICATIONS = new Set(["matched", "mismatch", "not_requested", "unknown"]);
 const CHANGED_PATH_STATUSES = new Set(["complete", "incomplete", "unknown"]);
+const INVOCATION_CONTRACT_SCHEMA = "dd.invocation-contract.v1";
+const INVOCATION_OUTCOMES = new Set(["verified_requested", "not_applicable", "unverified"]);
+const INVOCATION_FORMS = new Set(["separate", "equals", "presence"]);
+const INVOCATION_SETTINGS = new Set(["modelLabel", "effort", "permissionProfile", "noCommit", "autocompact"]);
+const INVOCATION_EVIDENCE_MEANINGS = new Set(["requested_argv_only", "requested_argv_and_adapter_default"]);
 export const ROLE_STATUS_VOCABULARY = Object.freeze({
   executor: new Set(["READY_FOR_VERIFICATION", "FAILED"]),
   planner: new Set(["APPROVE", "BLOCK", "NEEDS_EVIDENCE", "TRANSPORT_FAILED"]),
@@ -154,6 +159,7 @@ function normalizedAdapterEnvelope(value, expectedDigest) {
   if (value.cwdMode !== "inherits_process" && value.cwdMode !== "adapter_contract") fail("adapterEnvelope cwdMode is invalid", "E_ADAPTER_ENVELOPE");
   if (value.cwdMode === "inherits_process" && value.adapterContract !== null) fail("inherits_process adapterEnvelope requires adapterContract=null", "E_ADAPTER_ENVELOPE");
   if (value.cwdMode === "adapter_contract" && (!value.adapterContract || typeof value.adapterContract !== "object" || Array.isArray(value.adapterContract))) fail("adapter_contract adapterEnvelope requires adapterContract metadata", "E_ADAPTER_ENVELOPE");
+  const invocation = normalizedInvocationContract(value.invocationContract, value.invocationContractDigest);
   const base = {
     schemaVersion: "dd.adapter-envelope.v1",
     effectiveWorkingDirectory,
@@ -161,8 +167,10 @@ function normalizedAdapterEnvelope(value, expectedDigest) {
     adapterContract: value.adapterContract === null ? null : {
       adapter: requireText(value.adapterContract.adapter, "adapterContract adapter"),
       cwdArgument: requireText(value.adapterContract.cwdArgument, "adapterContract cwdArgument"),
-      cwdValue: assertRelativeInput(value.adapterContract.cwdValue, "adapterContract cwdValue"),
-    },
+        cwdValue: assertRelativeInput(value.adapterContract.cwdValue, "adapterContract cwdValue"),
+      },
+    invocationContract: invocation?.contract ?? null,
+    invocationContractDigest: invocation?.digest ?? null,
   };
   const digest = value.normalizedDigest ?? value.canonicalDigest ?? value.digest ?? expectedDigest ?? null;
   if (!/^[a-f0-9]{64}$/i.test(String(digest || ""))) fail("adapterEnvelope normalized digest is invalid", "E_ADAPTER_ENVELOPE");
@@ -182,6 +190,76 @@ function normalizedAdapterEnvelope(value, expectedDigest) {
     evidence: value.evidence ?? "declaration",
     limitation: value.limitation ?? "declaration/contract evidence only; argv and adapter cwd behavior are not OS attestation",
   };
+}
+
+function normalizedInvocationContract(value, expectedDigest = null) {
+  if (value === undefined || value === null) {
+    if (expectedDigest !== undefined && expectedDigest !== null) fail("invocationContractDigest requires invocation contract metadata", "E_INVOCATION_CONTRACT");
+    return null;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("invocationContract must be an object", "E_INVOCATION_CONTRACT");
+  const keys = Object.keys(value);
+  if (keys.some((key) => !["schemaVersion", "version", "settings"].includes(key))) fail("invocationContract contains an unsupported field", "E_INVOCATION_CONTRACT");
+  if (value.schemaVersion !== INVOCATION_CONTRACT_SCHEMA || value.version !== 1 || !value.settings || typeof value.settings !== "object" || Array.isArray(value.settings)) fail("invocationContract schema is invalid", "E_INVOCATION_CONTRACT");
+  if (Object.keys(value.settings).length > INVOCATION_SETTINGS.size || Object.keys(value.settings).some((key) => !INVOCATION_SETTINGS.has(key))) fail("invocationContract settings are invalid", "E_INVOCATION_CONTRACT");
+  const settings = {};
+  for (const key of Object.keys(value.settings).sort()) {
+    const declaration = value.settings[key];
+    if (!declaration || typeof declaration !== "object" || Array.isArray(declaration) || !INVOCATION_OUTCOMES.has(declaration.outcome)) fail(`invocationContract setting ${key} is invalid`, "E_INVOCATION_CONTRACT");
+    if (declaration.outcome === "not_applicable") {
+      if (typeof declaration.capability !== "string" || declaration.capability.length === 0 || Object.keys(declaration).some((field) => !["outcome", "capability"].includes(field))) fail(`invocationContract setting ${key} is invalid`, "E_INVOCATION_CONTRACT");
+      settings[key] = { outcome: declaration.outcome, capability: declaration.capability };
+    } else if (declaration.outcome === "unverified") {
+      if (typeof declaration.reason !== "string" || declaration.reason.length === 0 || Object.keys(declaration).some((field) => !["outcome", "reason"].includes(field))) fail(`invocationContract setting ${key} is invalid`, "E_INVOCATION_CONTRACT");
+      settings[key] = { outcome: declaration.outcome, reason: declaration.reason };
+    } else {
+      if (typeof declaration.flag !== "string" || !declaration.flag.startsWith("--") || !INVOCATION_FORMS.has(declaration.form) || Object.keys(declaration).some((field) => !["outcome", "flag", "value", "form", "index"].includes(field))) fail(`invocationContract setting ${key} is invalid`, "E_INVOCATION_CONTRACT");
+      if (declaration.form !== "presence" && (typeof declaration.value !== "string" || declaration.value.length === 0)) fail(`invocationContract setting ${key} requires a value`, "E_INVOCATION_CONTRACT");
+      if (declaration.form === "presence" && declaration.value !== undefined) fail(`invocationContract setting ${key} presence form cannot carry a value`, "E_INVOCATION_CONTRACT");
+      if (declaration.index !== undefined && declaration.index !== null && (!Number.isInteger(declaration.index) || declaration.index < 0 || declaration.index > 4095)) fail(`invocationContract setting ${key} index is invalid`, "E_INVOCATION_CONTRACT");
+      settings[key] = { outcome: declaration.outcome, flag: declaration.flag, form: declaration.form, ...(declaration.form === "presence" ? {} : { value: declaration.value }), index: declaration.index ?? null };
+    }
+  }
+  const contract = { schemaVersion: INVOCATION_CONTRACT_SCHEMA, version: 1, settings };
+  const digest = sha256Bytes(stableJson(contract));
+  if (expectedDigest !== undefined && expectedDigest !== null && expectedDigest !== digest) fail("invocationContractDigest does not match the contract", "E_INVOCATION_CONTRACT");
+  return { contract, digest };
+}
+
+export function deriveInvocationEvidenceMeaning(verified) {
+  if (verified === undefined || verified === null) return "requested_argv_only";
+  if (!verified || typeof verified !== "object" || Array.isArray(verified)) {
+    fail("invocation evidence verified settings must be an object", "E_INVOCATION_EVIDENCE");
+  }
+  let hasAdapterDefault = false;
+  for (const [setting, evidence] of Object.entries(verified)) {
+    if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
+      fail(`invocation evidence for ${setting} is malformed`, "E_INVOCATION_EVIDENCE");
+    }
+    if (evidence.evidence !== undefined) {
+      if (evidence.evidence !== "adapter_default") {
+        fail(`invocation evidence for ${setting} uses an unknown evidence kind`, "E_INVOCATION_EVIDENCE");
+      }
+      if (evidence.outcome !== "unverified" || evidence.form !== "default_absence") {
+        fail(`invocation evidence for ${setting} has an invalid adapter-default form`, "E_INVOCATION_EVIDENCE");
+      }
+      hasAdapterDefault = true;
+      continue;
+    }
+    if (evidence.outcome === "verified_requested" || evidence.outcome === "not_applicable") continue;
+    fail(`invocation evidence for ${setting} uses an unknown evidence kind`, "E_INVOCATION_EVIDENCE");
+  }
+  return hasAdapterDefault ? "requested_argv_and_adapter_default" : "requested_argv_only";
+}
+
+function normalizedInvocationEvidence(value) {
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail("invocationEvidence must be an object", "E_INVOCATION_EVIDENCE");
+  if (!INVOCATION_EVIDENCE_MEANINGS.has(value.meaning)) fail("invocationEvidence.meaning is unknown", "E_INVOCATION_EVIDENCE");
+  const derivedMeaning = deriveInvocationEvidenceMeaning(value.verified);
+  if (value.meaning !== derivedMeaning) fail("invocationEvidence.meaning contradicts verified evidence", "E_INVOCATION_EVIDENCE");
+  if (value.providerApplication !== "unknown" || value.providerEnforcement !== "unknown") fail("invocationEvidence must keep provider application and enforcement unknown", "E_INVOCATION_EVIDENCE");
+  return clone(value);
 }
 
 function normalizedList(value, rawLocator, maxItems, maxChars) {
@@ -338,6 +416,12 @@ export async function createResultCapsule(options = {}) {
 
   const changedPaths = normalizedChangedPaths(options.changedPaths, options.changedPathsRawLocator);
   const adapterEnvelope = normalizedAdapterEnvelope(options.adapterEnvelope, options.adapterEnvelopeDigest);
+  const invocationContract = clone(options.invocationContract) ?? adapterEnvelope?.invocationContract ?? null;
+  const invocationEvidence = normalizedInvocationEvidence(clone(options.invocationEvidence) ?? (invocationContract ? {
+    meaning: "requested_argv_only",
+    providerApplication: "unknown",
+    providerEnforcement: "unknown",
+  } : null));
   const gateInput = options.gateCoverage ?? {};
   const gateChecks = normalizedList(gateInput.checks ?? gateInput.items ?? [], gateInput.rawLocator, 32, 3500);
   if (gateInput.complete === true && gateChecks.items.length === 0) {
@@ -377,8 +461,15 @@ export async function createResultCapsule(options = {}) {
     suspensionStatus: suspension.status,
     suspensionEvidence: suspension.evidence,
     hostTelemetry: suspension.hostTelemetry,
+    adapterIdentifier: options.adapterIdentifier ?? null,
+    providerFamily: options.providerFamily ?? null,
+    roleProfile: clone(options.roleProfile) ?? null,
     adapterEnvelope,
     adapterEnvelopeDigest: adapterEnvelope?.normalizedDigest ?? null,
+    invocationContract,
+    invocationContractDigest: options.invocationContractDigest ?? adapterEnvelope?.invocationContractDigest ?? null,
+    invocationEvidence,
+    contextManagement: clone(options.contextManagement) ?? null,
     rawArtifacts: artifactEvidence,
     rawLocators: [...new Set([
       ...artifactEvidence.map((item) => item.locator),
@@ -473,6 +564,9 @@ export async function validateResultCapsule(value, options = {}) {
   try {
     const envelope = normalizedAdapterEnvelope(value.adapterEnvelope, value.adapterEnvelopeDigest);
     if (envelope && value.adapterEnvelopeDigest !== envelope.normalizedDigest) errors.push("adapterEnvelopeDigest is inconsistent");
+    const invocation = normalizedInvocationContract(value.invocationContract, value.invocationContractDigest);
+    if (invocation && envelope?.invocationContractDigest !== invocation.digest) errors.push("invocationContractDigest is inconsistent with the adapter envelope");
+    if (invocation && normalizedInvocationEvidence(value.invocationEvidence) === null) errors.push("invocation evidence is missing");
   } catch (error) {
     errors.push(error.message);
   }

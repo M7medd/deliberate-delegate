@@ -16,3 +16,15 @@ available for hosts that pass argv directly. Do not combine `--args-file` with
 either alternative. The `job` capsule roles are `executor`, `planner`, and
 `mechanical`; workflow role `planner-2` maps explicitly to capsule role
 `planner` at the caller boundary and is rejected if passed directly.
+
+The companion `dd-runtime.mjs` CLI adds deterministic project configuration,
+scoped verbatim human-question records with one atomic terminal, explicit
+first-session binding/replacement evidence, mechanical Claude argv inspection,
+result acknowledgement, and a derived next-stop projection below the Planning
+Lead. It uses the same controller-backed wait path for Planner 2 and Executor
+but never interprets answers, authorizes a Phase, chooses a verdict, or claims
+consumption savings. The confirmed role profile constrains dispatch; each
+adapter envelope carries a bounded invocation contract checked against actual
+argv. Attempts are recorded as `initial`, `correction`, or `technical_replay`;
+non-initial policy is enforced with immutable authorization evidence, while
+binding and attempt records use numeric ordering and connected-chain validation.

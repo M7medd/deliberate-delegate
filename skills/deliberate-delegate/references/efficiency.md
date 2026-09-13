@@ -10,6 +10,16 @@ host/model interactions, not mandatory review. It never approves, retries,
 commits, changes state, replaces role holders or starts another Phase. The exact
 safety capsule and all human/planner gates remain mandatory.
 
+The Architecture B `dd-runtime.mjs` CLI is the deterministic record/coordinator
+layer beneath the Lead. It uses the controller-backed `job` path for both public
+`planner-2` and `executor` dispatches, with scoped bindings, atomic question
+terminals, mechanical Claude argv inspection, and result acknowledgement. It
+does not replace the Lead's authorization or review. Confirmed linear
+configuration, applicable question, exact-session, replacement-evidence, and
+envelope checks are fail-closed stops; a status projection is navigation
+evidence only and does not guess a historical result. It does not measure or
+claim token, quota, cost, or subscription savings.
+
 ## Snapshot and gate
 
 Freeze the approved brief, validator configuration and governance inputs first.

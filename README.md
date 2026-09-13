@@ -2,7 +2,14 @@
 
 > Human-gated multi-agent coordination layer for dual-planner deliberation and delegated execution.
 
-**Current release:** `0.5.0`
+**Current release:** `0.6.0`
+
+Version 0.6.0 adds the deterministic Architecture B coordination runtime for
+confirmed project configuration, scoped questions, exact session binding,
+role-profile and invocation-contract validation, bounded dispatch/recovery,
+immutable events, result acknowledgement, and derived next-stop status. It
+keeps Phase authorization, semantic planning judgment, session replacement,
+and release authority outside the runtime.
 
 Version 0.5.0 hardens the runtime foundation with required project-relative
 adapter envelopes, fail-closed cwd validation, normalized dispatch identity,
@@ -43,6 +50,68 @@ initialization route was removed after the measured experiment did not
 demonstrate useful consumption savings. That result is mechanical evidence only,
 not a causal explanation or a universal inefficiency claim.
 
+## Version `0.6.0`
+
+Version 0.6.0 adds one deterministic, dependency-free `dd-runtime.mjs` path beneath the
+Planning Lead for project configuration, scoped verbatim human questions and
+answers, atomic terminal transitions, scoped first-session binding, exact-session
+continuation, Planner 2/Executor transport, deterministic artifacts, immutable
+events, result acknowledgement, and a derived next-stop projection.
+The runtime records evidence and returns required stops; it does not interpret
+answers, choose risk or verdicts, authorize work, replace sessions, advance a
+Phase, or claim B3 token, quota, cost, or subscription savings.
+
+The runtime requires a confirmed `dd.project-config.v1` record and a
+per-dispatch `dd.adapter-envelope.v1`/brief plus bounded `phaseKey` and
+`workPackageKey` dispatch context. `planner-2` maps to the existing capsule role
+`planner`; bindings are scoped by confirmed continuity policy and a first
+provider result with one usable session ID stops at `AWAITING_SESSION_BINDING`
+until an explicit confirmer records the immutable `dd.session-binding.v1`
+binding. Open or contradictory applicable questions, invalid configuration,
+invalid envelopes, unavailable suspension, missing mechanically inspected Claude
+Planner 2 `--autocompact 400k` argv, and session contradictions stop before an
+unauthorized next launch. Replacement requires immutable path/digest evidence;
+it is never automatic.
+
+The v0.6.0 correction path makes the confirmed role profile the sole source of
+adapter, provider family, model, effort, permission, and Executor `noCommit`
+  values; differing caller duplicates stop before launch. Each dispatch envelope
+  carries bounded `dd.invocation-contract.v1` metadata, which is checked against
+  the actual argv. Explicit selector evidence is requested-argv evidence; the
+  exact Claude Executor default is `adapter_default` evidence inferred from
+  bounded selector absence. Capsules use `requested_argv_only` for explicit-
+  only evidence and `requested_argv_and_adapter_default` when the latter is
+  present; neither meaning proves provider application or enforcement. Attempts are explicitly `initial`, `correction`,
+  or `technical_replay`; non-initial kinds require immutable authorization and
+  the configured/absolute correction or replay limits. The deterministic runtime
+  mappings are role-specific: Claude Planner 2 uses explicit `--read-only` plus
+  separated `--autocompact 400k`, while Claude Executor's configured
+  `workspace-write` profile uses the measured normal `acceptEdits` adapter
+  default, proven only by bounded absence of permission/autonomy selectors.
+  Codex Planner 2 uses explicit `--read-only`, and Codex Executor uses explicit
+  `--sandbox workspace-write`. Other adapters require a measured capability
+  mapping and unknown aliases stop before launch. Conflicting or broader
+  selectors are rejected; these evidence labels never prove provider
+  application, OS sandboxing, filesystem containment, or no-commit enforcement.
+  Binding, pending, and attempt records are ordered numerically, and a
+  role/scope binding is usable only after its complete connected chain validates.
+  Historical pending records are retained and resolved only by exact binding
+  request path/digest references. The Planning Lead owns semantic no-progress
+  decisions; runtime enforces immutable authorization, sequencing, and ceilings.
+
+### Local runtime CLI
+
+Run `node skills/deliberate-delegate/scripts/dd-runtime.mjs --help` from the
+project root. The CLI covers `questionnaire`, `config`, `question`, `binding`,
+`dispatch`, `result acknowledge`, and `status`. Verbatim human text, briefs,
+configuration answers, adapter envelopes, context evidence, acknowledgement
+evidence, and adapter argv are read from project-relative files. Records are
+create-once and bounded; the projection is non-authoritative and does not
+recursively guess a historical capsule. `noCommit` values are declared
+capability/evidence classes (`adapter_policy_declared`, `host_tool_guarded`, or
+`instruction_only`), not OS enforcement attestations. A complete Work Package
+still requires the Planning Lead's human/planner gates and independent review.
+
 **Repository:** https://github.com/M7medd/deliberate-delegate
 
 Deliberate Delegate is an instruction skill and documentation package that establishes a structured, human-authorized engineering loop. It coordinates two planners (Planning Lead and Planner 2) overseeing Work Package-scoped, resumable executor sessions across phased file-based project work.
@@ -78,7 +147,7 @@ Deliberate Delegate is an independent coordination layer built on and requiring 
 - A durable record system with immutable transcripts, versioned briefs, and structured state tracking.
 
 ### This skill IS NOT:
-- An autonomous background daemon or replacement provider execution runtime.
+- An autonomous background daemon, LLM manager, or replacement for provider execution transport.
 - A replacement for provider CLIs or upstream `*-delegate` adapters.
 - A fork or vendored copy of upstream relay scripts.
 - An unmonitored agent workflow with automatic cross-phase execution.
@@ -180,7 +249,8 @@ User: I authorize execution of Phase 01 according to docs/deliberate-delegate/ph
 
 ## Deferred, not implemented
 
-The following capabilities remain deferred from the `0.4` series:
+The following capabilities remain deferred from this release and earlier
+releases:
 
 - Unattended advancement across multiple Phases.
 - Automated cross-provider context-occupancy monitoring. Claude launch
@@ -190,6 +260,10 @@ The following capabilities remain deferred from the `0.4` series:
 - Automatic agent replacement or dynamic failover.
 - Multi-Phase orchestration pipelines.
 - Domain-specific or live hardware adapters.
+- B3 controlled A/B measurement of Lead turns, provider-reported usage, quality,
+  or real token/quota/cost savings.
+- Bounded evidence/context briefs beyond the minimum runtime inputs.
+- C project indexing and PLC/HMI impact slicing.
 
 ---
 
@@ -198,19 +272,26 @@ The following capabilities remain deferred from the `0.4` series:
 Release verification (Node, no packages or model calls):
 
 ```powershell
-node --test tests/dd-efficiency.test.mjs tests/dd-efficiency-run-index.test.mjs tests/dd-v04.test.mjs tests/dd-usage.test.mjs
+node --test tests/dd-efficiency.test.mjs tests/dd-efficiency-run-index.test.mjs tests/dd-v04.test.mjs tests/dd-usage.test.mjs tests/dd-runtime.test.mjs
+node --check skills/deliberate-delegate/scripts/dd-runtime.mjs
+node --check skills/deliberate-delegate/scripts/lib/job-controller.mjs
+node --check skills/deliberate-delegate/scripts/lib/project-config.mjs
+node --check skills/deliberate-delegate/scripts/lib/question-queue.mjs
+node --check skills/deliberate-delegate/scripts/lib/result-capsule.mjs
+node --check skills/deliberate-delegate/scripts/lib/runtime-coordinator.mjs
 node tests/dd-efficiency-benchmark.mjs
 ```
 
 Fixtures stay in ignored `tests/.dd-efficiency-scratch/`, `tests/.dd-v04-scratch/`,
-and `tests/.dd-usage-scratch/`, never live projects.
-Release verification recorded 43 tests, 42
-passes, 1 expected Windows descendant-pipe skip, and 0 failures. `quick_validate.py`
-was `NOT_RUN` because no Python interpreter was available.
+`tests/.dd-usage-scratch/`, and `tests/.dd-runtime-scratch/`, never live projects.
+The correction candidate's verification report records the exact current test
+counts and any expected platform skip. Run `quick_validate.py` only when an
+already-installed Python interpreter is available; otherwise report it as
+`NOT_RUN`.
 The benchmark compares identical synthetic checks including failures. Host calls
 and visible bytes are not proof of token, quota, cost, or end-to-end savings; a
 live A/B with host telemetry is needed.
 
-This is the `0.5.0` specification, instruction skill, and optional mechanical
+This is the `0.6.0` specification, instruction skill, and optional mechanical
 runtime. It is not production-proven, warranted for reliability, or endorsed by
 upstream tool authors.

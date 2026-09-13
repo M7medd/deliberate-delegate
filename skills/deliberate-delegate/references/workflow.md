@@ -98,6 +98,25 @@ This document defines the 12 lifecycle rules, operational boundaries, and stop g
   decision occurs between dispatch and terminal result.
 - The normal path has one initial package dispatch. If review identifies a correctable defect or transport failure occurs, the existing correction and single technical-replay rules remain in force.
 - By default, all operations are file-only within the project workspace directory.
+- Role-specific mapped permission paths remain narrow: Claude Planner 2 passes
+  explicit `--read-only` and separated `--autocompact 400k`; Claude Executor's
+  configured file-only `workspace-write` profile uses the measured normal
+  `acceptEdits` adapter default and proves only bounded absence of permission
+  selectors. Codex Planner 2 passes explicit `--read-only`, and Codex Executor
+  passes explicit `--sandbox workspace-write`. Explicit selectors are
+  requested-argv evidence; the Claude Executor default is adapter-default
+  evidence, and the capsule distinguishes explicit-only from mixed evidence.
+  Native Windows Claude has no host OS sandbox attestation.
+
+The Architecture B runtime is a deterministic transport and record layer below
+the Lead. It may render the fixed initialization questionnaire, preserve exact
+scoped human answers with one atomic terminal transition, validate a linear
+configuration chain and envelopes, dispatch Planner 2 or Executor, inspect the
+actual Claude argv preflight, wait, bind a returned session after explicit
+confirmation, preserve authorized replacement evidence, acknowledge that a
+result was handled, and derive a next stop. It never interprets an answer,
+creates authority, chooses a verdict or risk tier, chains across a judgment
+gate, or replaces the Phase/Step workflow.
 
 ---
 
@@ -109,6 +128,13 @@ Before the first applicable check or dispatch, the Lead reads the [efficiency he
 - Git status and diffs cover workspace state only. The Executor must declare every outside-root path created or updated during the dispatch; a report claiming `none` is an unverified claim, not evidence.
 - The Planning Lead compares executor declarations against provider and runtime evidence available to the host, but must not claim complete outside-root observability when it does not exist.
 - Self-reported claims or summaries by the Executor are never accepted as verification evidence; only concrete diffs and tool outputs are valid evidence.
+
+The runtime's configuration, events, scoped binding records, stop records,
+acknowledgements, and status projection are evidence/navigation records. A
+confirmed configuration is required for dispatch, but it is not Phase
+authorization; an immutable session binding is continuity evidence, and a result
+acknowledgement means only that the Planning Lead handled the capsule—not
+approval of the provider result.
 
 ---
 
@@ -131,18 +157,29 @@ not reread every original source. Full briefs, the exact safety capsule, visible
 debates and both explicit planner approvals remain required.
 
 - If the implementation has correctable defects, omissions, or failing tests, the planners deliberate on the required fixes. The Phase supplies `maxCorrections`; the backward-compatible default is two and the absolute v0.4 ceiling is three. The Executor cannot raise or replace this policy.
-- A no-progress attempt means the same blocking defect remains without new relevant evidence or a meaningful delta; stop with `STOPPED_NO_PROGRESS` instead of consuming another correction.
+- The Planning Lead applies the existing `evaluateCorrection` policy to the
+  structured blocking defect IDs and available delta/evidence. If the same
+  blocking defect remains without new relevant evidence or a meaningful delta,
+  the Lead stops with `STOPPED_NO_PROGRESS` instead of authorizing another
+  correction. The deterministic runtime verifies the immutable authorization and
+  mechanical sequence only; it does not infer semantic no-progress from an
+  arbitrary text file.
 - The Planning Lead creates a new immutable correction brief version (`brief.v2.md`) conforming to [the Brief and Result Contract](brief-contract.md) and dispatches it to resume the same Work Package Executor session.
 - The default permits two correction attempts (initial brief plus up to 2 corrections). A configured policy may be lower or, up to the absolute ceiling, higher; a third required correction under the default policy halts the Phase.
+- The runtime records every dispatch as `initial`, `correction`, or `technical_replay`. A correction carries an immutable project-relative authorization path and SHA-256 digest plus a sequential ordinal within the confirmed policy; the runtime validates evidence but does not interpret its prose or create authority.
 
 ---
 
 ## 10. Technical Failure and Replay Policy
 
-- Transient transport failures, CLI timeouts, or network interruptions during model transport may trigger at most **one** technical replay (`retry 0..1`) of the exact identical immutable brief to the same resumable session.
+- Transient transport failures, CLI timeouts, or network interruptions during model transport may trigger at most **one** technical replay (`retry 0..1`) of the exact identical immutable brief to the same resumable session. The replay also requires immutable replay authorization evidence and SHA-256 validation.
 - A technical replay is not a correction and does not consume a correction attempt.
+- The replay must retain the same job, brief, phase/work-package scope, role profile, adapter identity, and confirmed bound session; drift is a contradiction and cannot launch a provider.
 - A nontransient exhausted quota, authentication, or budget failure is not blindly replayed unchanged. Before the single replay, require evidence that the relevant condition is resolved and reconcile any prior partial work; otherwise stop and escalate.
-- `technicalRetryCount` resets to `0` only when a new immutable brief version becomes active. Replaying the same brief does not reset `technicalRetryCount`.
+- The one permitted `technicalRetryCount` is per Work Package/job and never
+  resets when a new immutable correction brief becomes active inside that job.
+  Replaying the same brief does not consume a correction or reset the replay
+  allowance.
 - A second consecutive technical failure on the same brief version, or a corrupted/non-resumable session, immediately stops the Phase and escalates to the user.
 - After restart, uncertain work is `UNKNOWN` until reconciled. A known terminal
   result with a trusted matching idempotency key is reused and does not rerun

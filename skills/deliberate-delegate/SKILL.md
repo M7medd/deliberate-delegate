@@ -3,7 +3,7 @@ name: deliberate-delegate
 description: Human-gated multi-agent coordination with durable project records, risk-sensitive planner review, awaitable Work Package execution, independent dual review, and bounded recovery.
 license: MIT
 metadata:
-  version: 0.5.0
+  version: 0.6.0
 ---
 
 # Deliberate Delegate
@@ -25,11 +25,14 @@ review, and gates.
 - Planner 2 has Phase-scoped continuity by default for v0.4. A
   fresh-per-package Planner 2 is an experiment, not the recommendation, because
   cache-creation cost is unresolved.
-- When Claude is Planner 2, every substantive launch or resume must have an
-  effective `--autocompact 400k` setting verified in the dispatch envelope or
-  provider evidence before the call. Do not assume a setting from an earlier
-  launch persists. If the active adapter cannot pass or verify it, stop and
-  report the compatibility gap instead of claiming it is enabled.
+- When the confirmed Planner 2 `providerFamily` is `claude`, every substantive
+  launch or resume must have exactly one `--autocompact 400k` declaration
+  mechanically inspected in the actual dispatch argv before the call. Caller
+  context JSON and an adapter name cannot verify it; the inspection proves the
+  requested argument only, not provider-side application or enforcement. Do not
+  assume a setting from an earlier launch persists. If the active adapter cannot
+  pass it, stop and report the compatibility gap instead of claiming it is
+  enabled.
 - Manual compaction is recovery only: use it in the exact same session when
   automatic compaction actually fails or a concrete context problem appears,
   then record the trigger and result. Never schedule manual compaction merely
@@ -84,6 +87,18 @@ for the exact Codex pattern and evidence limits.
 
 The runtime foundation provides:
 
+- `scripts/dd-runtime.mjs` — dependency-free local CLI for the deterministic
+  questionnaire/configuration, scoped immutable human-question queue with one
+  atomic terminal transition, scoped session binding/replacement evidence,
+  shared Planner 2/Executor dispatch, result acknowledgement, and derived
+  next-stop projection;
+- `scripts/lib/project-config.mjs` and `scripts/lib/question-queue.mjs` —
+  create-once linear configuration-chain records and scoped verbatim
+  question/answer/withdrawal records;
+- `scripts/lib/runtime-coordinator.mjs` — the non-authoritative coordinator that
+  gates dispatch on confirmed configuration, applicable question and scoped
+  binding stops, performs mechanical mapped-adapter argv inspection, and records
+  result acknowledgement without treating it as approval;
 - `scripts/lib/lifecycle-core.mjs` — shared containment, process capture,
   bounded drain, validation, session mapping, summaries, and correction policy;
 - `scripts/lib/job-controller.mjs` — one-dispatch `ProcessJobController` with
@@ -101,6 +116,31 @@ string-level declaration/contract evidence, not OS attestation. Provider usage
 is recorded only when the provider reports it; DD invents no cost, quota, or
 token claim.
 
+The runtime configuration is operational metadata, not authorization. It may
+show computed repository/cwd/identity values and preserve human inputs, but it
+cannot contain Phase scope, allowlists, acceptance criteria, risk decisions,
+validators, safety authority, correction approval, role replacement approval, or
+merge/release/push/live-system approval. The runtime returns those decisions to
+the Planning Lead or user and never creates a second Phase/Step state machine.
+Its `providerFamily` values are closed (`claude`, `codex`, `gemini`, `other`),
+and `noCommit` values are non-attesting declarations (`adapter_policy_declared`,
+`host_tool_guarded`, `instruction_only`), not OS enforcement proof.
+For every dispatch, the active confirmed role profile is the sole source of
+adapter, provider family, model, effort, permission, and Executor `noCommit`
+values; a differing caller duplicate stops. The per-dispatch envelope carries
+  bounded `dd.invocation-contract.v1` metadata that is checked against actual
+  argv before launch. Explicit selector evidence is requested-argv evidence;
+  Claude Executor's adapter default is `adapter_default` evidence inferred from
+  bounded selector absence. Claude Planner 2 requires explicit `--read-only` and
+  separated `--autocompact 400k`; Claude Executor's file-only `workspace-write`
+  profile uses the mapped relay's normal `acceptEdits` default and proves only
+  bounded selector absence. Codex Planner 2 uses explicit `--read-only`, while
+  Codex Executor uses explicit `--sandbox workspace-write`. All such evidence
+  is limited to requested argv or bounded adapter-parser behavior and never proves provider
+  application, OS sandboxing, filesystem containment, or enforcement; a capsule
+  uses `requested_argv_only` for explicit-only evidence and
+  `requested_argv_and_adapter_default` when both evidence classes are present.
+
 For a user-authorized usage experiment, initialize the usage ledger before the
 Lead's first project inspection, take a zero-delta Lead baseline, and capture
 each terminal planner/executor attempt—including failures—at the next Work
@@ -111,9 +151,17 @@ to reconstruct consumption from memory or load transcripts to calculate it.
 
 The Phase configures the correction policy. The backward-compatible default is
 two correction attempts; the absolute ceiling is three. An executor
-cannot raise it. A no-progress attempt with the same blocking defects and no
-new relevant evidence stops immediately. A restart treats uncertain work as
-`UNKNOWN` until reconciled; a known terminal result is reused without rerunning.
+cannot raise it. Every dispatch is recorded as `initial`, `correction`, or
+`technical_replay`; correction and replay require immutable project-relative
+authorization evidence and SHA-256 validation. Corrections use a sequential
+ordinal within the configured/absolute ceiling; a technical replay is distinct,
+allowed once per Work Package/job, and requires the same immutable identity and
+bound session after a qualifying transport failure. The Planning Lead applies
+the structured `evaluateCorrection` policy to decide semantic no-progress;
+runtime does not infer that judgment from arbitrary authorization text. Binding,
+pending, and attempt records are selected numerically only after their connected
+chain validates. A restart treats uncertain work as `UNKNOWN` until reconciled;
+a known terminal result is reused without rerunning.
 Timeout reports child-only termination unless a platform implementation proves
 more. Partial edits remain evidence; DD never runs automatic reset, checkout,
 deletion, or cleanup.

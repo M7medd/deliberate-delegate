@@ -17,6 +17,15 @@ The controller is deliberately not a daemon, database, scheduler, provider
 failover layer, or second Phase/Step state machine. Provider-specific transport
 and exact-session syntax remain in the upstream adapter envelope.
 
+The `dd-runtime.mjs` coordinator uses this same controller path for both public
+`planner-2` and `executor` roles. It records configuration, applicable scoped
+question, binding/replacement, envelope, and content-addressed stop records
+around the dispatch; it does not add polling, an LLM manager, automatic
+verdicts, or a second workflow state machine. Its deterministic attempt path is
+`runtime/jobs/<job-key>/attempt-<NN>/` and a returned first-session result stops
+at `AWAITING_SESSION_BINDING` until a separate scoped confirmation record exists.
+Result acknowledgement is an immutable handled-result boundary, not approval.
+
 If the host reports that suspend-and-await is unavailable, the controller stores
 `suspensionStatus: unavailable`, writes a stop record, dispatches zero workers,
 and returns control to the user. There is no silent fallback to model polling.
@@ -186,10 +195,12 @@ logs incomplete. Partial workspace edits remain for inspection. No automatic
 
 The Phase record supplies `maxCorrections` from `0` through the absolute
 v0.4 ceiling of `3`; the default remains `2`. The executor cannot replace
-or raise that policy. A correction with the same blocking defects and no new
-relevant evidence or meaningful delta is `STOPPED_NO_PROGRESS`. Reaching the
-configured limit is `STOPPED_CORRECTION_LIMIT`. Both outcomes stop the Phase
-for user intervention.
+or raise that policy. The Planning Lead applies the structured correction policy
+to decide whether the same blocking defects remain without new relevant evidence
+or a meaningful delta; that decision is recorded as `STOPPED_NO_PROGRESS`.
+Reaching the configured limit is `STOPPED_CORRECTION_LIMIT`. Both outcomes stop
+the Phase for user intervention; the deterministic runtime does not infer either
+semantic conclusion from arbitrary text.
 
 ## Controlled pilot boundary
 

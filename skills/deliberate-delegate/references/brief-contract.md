@@ -8,6 +8,14 @@ The Planning Lead checks that every mandatory field is present, internally consi
 
 Do not dispatch when a mandatory field is missing or contradictory. Do not ask the Executor to infer scope, authority, acceptance, or safety boundaries.
 
+The deterministic runtime may mechanically require a confirmed linear project
+configuration, an applicable scoped question queue with one terminal outcome,
+explicit session-creation/binding or replacement evidence, bounded phase/work-
+package context, and a validated per-dispatch envelope before it calls the
+existing controller. Those records constrain transport and preserve evidence;
+they do not replace the brief, Phase authorization, planner verdict, result
+acknowledgement authority, or user authority.
+
 ## Initial Step Brief
 
 Every initial brief contains:

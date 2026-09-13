@@ -34,6 +34,55 @@ reinterpretation. Regrouping requires a new immutable plan and the normal
 planner and user gates for any changed authorized commitments. This semantic
 clarification adds no lifecycle state and requires no migration.
 
+## Runtime foundation records
+
+The deterministic runtime uses the same project-local root without replacing
+the Phase `state.json` authority path:
+
+```text
+docs/deliberate-delegate/
+  configuration/
+    configuration.v1.json
+    configuration.v1.confirmation.json
+  runtime/
+    questions/<question-key-sha256>/question.json
+    questions/<question-key-sha256>/terminal.json
+    bindings/<role>/<scope-sha256>/pending.v1.json
+    bindings/<role>/<scope-sha256>/pending-replacement.vN.json
+    bindings/<role>/<scope-sha256>/binding.vN.json
+    jobs/<job-key>/attempt-<NN>/dispatch-request.v1.json
+    jobs/<job-key>/attempt-<NN>/result.json
+    jobs/<job-key>/attempt-<NN>/controller/...
+    acknowledgements/<capsule-path-sha256>.json
+    stops/stop-<sha256>.json
+    events/<event-id>.json
+```
+
+`dd.project-config.v1`, `dd.question.v1`, `dd.answer.v1`,
+`dd.question-withdrawal.v1`, `dd.session-binding.v1`,
+`dd.result-acknowledgement.v1`, and `dd.runtime-event.v1` records are create-once.
+Identical canonical bytes are reused; contradictory bytes stop. Answer and
+withdrawal compete for one exclusive `terminal.json`; legacy dual records are
+preserved as scoped contradictions and are never rewritten. Verbatim
+question/answer records are stored as complete UTF-8 JSON records under the
+documented 1 MiB ceiling and are never truncated. Runtime status is a
+regenerated, non-authoritative projection; it must not write `phaseState` or
+`stepState` and does not select an arbitrary historical capsule globally.
+The amended runtime event vocabulary includes `stop_recorded` for mechanical
+stops; `envelope_rejected` is emitted only for adapter-envelope rejection.
+Dispatch requests bind the complete confirmed role profile, configuration path
+  and digest, attempt kind/authorization evidence, and invocation-contract digest
+  into the immutable identity. Binding versions, pending replacement versions,
+  and attempt directories are ordered numerically. Every newly confirmed binding
+  preserves the exact `bindingRequestPath` and `bindingRequestDigest` that
+  produced it; a replacement also preserves its replacement authorization and
+  exact predecessor digest. Before a binding is used, the runtime validates one
+  connected role/scope chain: v1 has no predecessor and each later version
+  supersedes the exact previous digest. Historical pending records remain
+  immutable audit evidence; only a request referenced by the exact path and
+  digest in its binding is resolved. Identical pending records are reused;
+  contradictory, forked, skipped, stale, or malformed links stop.
+
 ---
 
 ## Immutability and Versioning Rules
@@ -82,7 +131,9 @@ Keeping `phaseState` separate from `stepState` prevents a restart from dispatchi
 - `AUTHORIZED`: Direct human authorization recorded, branch created, ready for step execution.
 - `IN_PROGRESS`: Step execution currently underway.
 - `STOPPED_CORRECTION_LIMIT`: Halted due to exceeding the Phase-configured correction attempts.
-- `STOPPED_NO_PROGRESS`: Halted because the same blocking defect remained without relevant evidence or a meaningful delta.
+- `STOPPED_NO_PROGRESS`: Planning Lead recorded, using the structured correction
+  policy, that the same blocking defect remained without relevant evidence or a
+  meaningful delta; this is not a runtime inference from arbitrary text.
 - `STOPPED_TECHNICAL_FAILURE`: Halted due to repeated technical failures or lost session.
 - `STOPPED_GATE_FAILURE`: Halted due to unrecoverable gate or test failure.
 - `STOPPED_USER_INTERVENTION`: Halted manually or awaiting user clarification.
@@ -181,15 +232,21 @@ Keeping `phaseState` separate from `stepState` prevents a restart from dispatchi
 
 ### Key Field Contracts
 
-- `executionProfile`: Records the actual non-secret dispatch envelope: adapter, model label, effort, exact-session resume mode, timeout, optional budget metadata if any, permission profile, declared `noCommit` mode (`transport_enforced`, `tool_guarded`, or `instruction_only`), non-secret provider flags, brief-contract version, safety-policy identifier, and `outsideRuntimePathsDeclared`. It also records the selected `waitPath` (`single_outer_call`, an explicitly described equivalent, or `unavailable`) and whether suspension availability was asserted before dispatch. The envelope may adapt transport mechanics but must never change the canonical brief's objective, scope, acceptance criteria, verification procedures, safety capsule, or result contract. A budget entry records an actual inherited or user-specified limit; it is not an automatic dollar cap.
+- `executionProfile`: Records the actual non-secret dispatch envelope: adapter, model label, effort, exact-session resume mode, timeout, optional budget metadata if any, permission profile, declared `noCommit` class (`adapter_policy_declared`, `host_tool_guarded`, or `instruction_only`), non-secret provider flags, brief-contract version, safety-policy identifier, and `outsideRuntimePathsDeclared`. These classes are capability/evidence declarations, not OS enforcement attestation. It also records the selected `waitPath` (`single_outer_call`, an explicitly described equivalent, or `unavailable`) and whether suspension availability was asserted before dispatch. The envelope may adapt transport mechanics but must never change the canonical brief's objective, scope, acceptance criteria, verification procedures, safety capsule, or result contract. A budget entry records an actual inherited or user-specified limit; it is not an automatic dollar cap.
+- For the exact mapped Claude Executor profile (`claude-delegate` + `claude` + configured `workspace-write`), the permission declaration uses the existing `unverified` contract outcome with reason `adapter-parser/default_absence:acceptEdits`. The capsule's non-authoritative `invocationEvidence.verified.permissionProfile` records `evidence: adapter_default`, `form: default_absence`, the measured absent selector list, and the adapter-parser limitation. Its outer meaning is `requested_argv_only` for explicit-only settings and `requested_argv_and_adapter_default` when this evidence is present with them. It never records this as `verified_requested` and never attests provider application, OS sandboxing, filesystem containment, or no-commit enforcement. Claude Planner 2 remains the explicit separated `--read-only` plus `--autocompact 400k` path; Codex Planner 2 and Executor retain their explicit flag mappings.
 - A persisted controlled job/capsule also records a normalized `dd.adapter-envelope.v1`: the project-relative `effectiveWorkingDirectory`, `cwdMode` (`inherits_process` or `adapter_contract`), bounded adapter contract metadata when applicable, its canonical/normalized SHA-256 digest, and the CLI envelope source-file digest when a project-relative JSON file supplied it. The source-file digest is evidence only and is not part of `dd.dispatch-identity.v2`; direct library declarations have no source-file digest. Envelope and argv matching are declaration/contract evidence, not OS attestation, and unknown or unmodelled cwd mechanisms remain unverifiable.
-- `contextManagement`: A non-authoritative evidence envelope. When Claude is Planner 2, record role/provider, required automatic mode, requested `--autocompact 400k` setting, capability classification (`adapter_flag`, `provider_native_auto`, `provider_native_manual`, or `unsupported`), evidence of the effective setting for the current launch/resume, and a `verified` preflight result before every substantive call. A prior launch or session ID is not evidence that the setting persists. If the setting cannot be passed or verified, record `unsupported` and stop before the call. Manual recovery records its concrete trigger, method, and result and is allowed only after automatic compaction fails or a context problem is observed; it is never scheduled routinely. Unknown provider metrics remain `unknown`. Context occupancy and compaction are separate from five-hour subscription usage or quota.
+- `contextManagement`: A non-authoritative evidence envelope. When the confirmed Planner 2 `providerFamily` is `claude`, record the role/provider family, required automatic mode, requested `--autocompact 400k` setting, actual argv inspection, and a `verified` preflight result only when exactly one separated declaration is present in the measured relay option list. Equals form and an option terminator are not supported by that relay grammar. Caller context JSON is telemetry only and cannot verify the preflight. The record proves the requested argument was passed, not provider-side application or enforcement. A prior launch or session ID is not evidence that the setting persists. If the setting cannot be passed or verified, record rejection and stop before the call. Manual recovery records its concrete trigger, method, and result and is allowed only after automatic compaction fails or a context problem is observed; it is never scheduled routinely. Unknown provider metrics remain `unknown`. Context occupancy and compaction are separate from five-hour subscription usage or quota.
 - `outsideRuntimePathsDeclared`: List of paths created or updated outside the workspace root as reported by the executor. This is an executor declaration/claim, not independent proof. Under Option A2, every path must belong to the exact authorized role session for the Work Package, remain inside the provider's documented session/scratch/cache area, and contain runtime/session transport state only. Any undeclared or unauthorized outside write, or any outside-root deletion without direct action-specific user approval, constitutes a mechanical gate failure.
 - `correctionAttempt`: Integer from `0` through the Phase-configured
   `correctionPolicy.maxCorrections`; the absolute v0.4 ceiling is `3`.
   Increments on each corrective brief version dispatched. The Executor cannot
-  raise or replace the policy. A no-progress attempt stops before dispatch.
-- `technicalRetryCount`: Integer (`0..1`). Replaying the same immutable brief version for technical transport failure does not reset this counter and does not consume a correction. It resets to `0` only when a new immutable brief version becomes active.
+  raise or replace the policy. The Planning Lead owns the semantic no-progress
+  decision; the runtime does not infer it from arbitrary authorization text.
+- `technicalRetryCount`: Integer (`0..1`) for the complete Work Package/job.
+  Replaying the same immutable brief version for technical transport failure
+  does not reset this counter and does not consume a correction. The one
+  permitted technical replay never resets inside that job, including when a
+  later correction brief becomes active.
 
 ### Job and capsule recovery
 

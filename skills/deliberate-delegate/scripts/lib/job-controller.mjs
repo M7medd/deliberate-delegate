@@ -21,12 +21,87 @@ import {
   validateResultArtifact,
   writeNewFile,
 } from "./lifecycle-core.mjs";
-import { emitResultCapsule, loadAndValidateCapsule } from "./result-capsule.mjs";
+import { deriveInvocationEvidenceMeaning, emitResultCapsule, loadAndValidateCapsule } from "./result-capsule.mjs";
 
 export const JOB_CONTROLLER_SCHEMA = "dd.process-job.v1";
 export const ADAPTER_ENVELOPE_SCHEMA = "dd.adapter-envelope.v1";
 export const DISPATCH_IDENTITY_SCHEMA = "dd.dispatch-identity.v2";
+export const INVOCATION_CONTRACT_SCHEMA = "dd.invocation-contract.v1";
 const ADAPTER_ENVELOPE_LIMITATION = "declaration/contract evidence only; argv and adapter cwd behavior are not OS attestation";
+const INVOCATION_LIMITATION = "invocation evidence is requested argv or bounded adapter-default evidence only; provider application, OS sandboxing, filesystem containment, and no-commit enforcement are unknown";
+const INVOCATION_OUTCOMES = new Set(["verified_requested", "not_applicable", "unverified"]);
+const INVOCATION_FORMS = new Set(["separate", "equals", "presence"]);
+const INVOCATION_SETTINGS = new Set(["modelLabel", "effort", "permissionProfile", "noCommit", "autocompact"]);
+const CLAUDE_EXECUTOR_DEFAULT_REASON = "adapter-parser/default_absence:acceptEdits";
+const CLAUDE_EXECUTOR_DEFAULT_LIMITATION = "adapter-parser/default evidence only; provider application, OS sandboxing, filesystem containment, and no-commit enforcement are unknown";
+const CLAUDE_EXECUTOR_DEFAULT_ABSENT_FLAGS = Object.freeze([
+  "--read-only",
+  "--dangerously-skip-permissions",
+  "--permission-mode",
+  "--sandbox",
+  "--lane",
+  "--permission-profile",
+]);
+
+const FIXTURE_CAPABILITIES = Object.freeze({
+  providerFamily: "other",
+  modelLabel: null,
+  effort: null,
+  permissionProfile: null,
+  noCommit: null,
+  autocompact: null,
+});
+
+const CONTRACT_FIXTURE_CAPABILITIES = Object.freeze({
+  providerFamily: "other",
+  modelLabel: Object.freeze({ flag: "--model", forms: Object.freeze(["separate"]) }),
+  effort: Object.freeze({ flag: "--effort", forms: Object.freeze(["separate"]) }),
+  permissionProfile: Object.freeze({ flag: "--permission-profile", forms: Object.freeze(["separate"]) }),
+  noCommit: null,
+  autocompact: Object.freeze({ flag: "--autocompact", forms: Object.freeze(["separate"]) }),
+});
+
+const CLAUDE_DELEGATE_CAPABILITIES = Object.freeze({
+  providerFamily: "claude",
+  modelLabel: Object.freeze({ flag: "--model", forms: Object.freeze(["separate"]), noTerminator: true }),
+  effort: Object.freeze({ flag: "--effort", forms: Object.freeze(["separate"]), noTerminator: true }),
+  permissionProfile: Object.freeze({
+    values: Object.freeze({
+      "read-only": Object.freeze({ flag: "--read-only", forms: Object.freeze(["presence"]), noTerminator: true }),
+      "workspace-write": Object.freeze({
+        adapterDefaultProfile: "acceptEdits",
+        absentFlags: CLAUDE_EXECUTOR_DEFAULT_ABSENT_FLAGS,
+        noTerminator: true,
+      }),
+    }),
+  }),
+  noCommit: null,
+  autocompact: Object.freeze({ flag: "--autocompact", forms: Object.freeze(["separate"]), noTerminator: true }),
+});
+
+const CODEX_DELEGATE_CAPABILITIES = Object.freeze({
+  providerFamily: "codex",
+  modelLabel: Object.freeze({ flag: "--model", forms: Object.freeze(["separate"]), noTerminator: true }),
+  effort: Object.freeze({ flag: "--effort", forms: Object.freeze(["separate"]), noTerminator: true }),
+  permissionProfile: Object.freeze({
+    values: Object.freeze({
+      "read-only": Object.freeze({ flag: "--read-only", forms: Object.freeze(["presence"]), noTerminator: true }),
+      "workspace-write": Object.freeze({ flag: "--sandbox", forms: Object.freeze(["separate"]), noTerminator: true }),
+    }),
+  }),
+  noCommit: null,
+  autocompact: null,
+});
+
+const ADAPTER_CAPABILITIES = Object.freeze({
+  "local-fixture": FIXTURE_CAPABILITIES,
+  "planner-fixture": FIXTURE_CAPABILITIES,
+  "executor-fixture": FIXTURE_CAPABILITIES,
+  fixture: FIXTURE_CAPABILITIES,
+  "contract-fixture": CONTRACT_FIXTURE_CAPABILITIES,
+  "claude-delegate": CLAUDE_DELEGATE_CAPABILITIES,
+  "codex-delegate": CODEX_DELEGATE_CAPABILITIES,
+});
 
 function text(value, label) {
   if (typeof value !== "string" || value.length === 0) throw new Error(`${label} must be a non-empty string`);
@@ -44,11 +119,14 @@ function pathsOverlap(left, right) {
   return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
-function dispatchIdentity(options, { resultRelative, artifactRelative, jobRelative, capsuleRelative, adapterEnvelopeDigest }) {
+function dispatchIdentity(options, { resultRelative, artifactRelative, jobRelative, capsuleRelative, adapterEnvelopeDigest, invocationContractDigest: contractDigest = null }) {
   const identity = {
     schemaVersion: DISPATCH_IDENTITY_SCHEMA,
     role: options.role,
     adapter: options.adapter,
+    adapterIdentifier: options.adapterIdentifier ?? null,
+    providerFamily: options.providerFamily ?? null,
+    roleProfile: options.roleProfile ?? null,
     args: options.args,
     resultPath: resultRelative,
     expectedSession: options.expectedSession,
@@ -57,6 +135,8 @@ function dispatchIdentity(options, { resultRelative, artifactRelative, jobRelati
     capsulePath: capsuleRelative,
     timeoutMs: options.timeoutMs,
     adapterEnvelopeDigest,
+    invocationContractDigest: contractDigest ?? options.invocationContractDigest ?? null,
+    contextManagement: options.contextManagement ?? null,
   };
   return identity;
 }
@@ -70,6 +150,9 @@ function rawRequestDigest(options, { resultRelative, artifactRelative, jobRelati
     schemaVersion: "dd.dispatch-request.v2",
     role: options.role,
     adapter: options.adapter,
+    adapterIdentifier: options.adapterIdentifier ?? null,
+    providerFamily: options.providerFamily ?? null,
+    roleProfile: options.roleProfile ?? null,
     args: options.args,
     resultPath: resultRelative,
     expectedSession: options.expectedSession,
@@ -81,6 +164,9 @@ function rawRequestDigest(options, { resultRelative, artifactRelative, jobRelati
     adapterEnvelopeSourceFile: options.adapterEnvelopeSourceFile ?? null,
     adapterEnvelopeSourceDigest: options.adapterEnvelopeSourceDigest ?? null,
     adapterEnvelopeSourceError: options.adapterEnvelopeSourceError ?? null,
+    invocationContract: options.adapterEnvelope?.invocationContract ?? null,
+    invocationContractDigest: options.invocationContractDigest ?? null,
+    contextManagement: options.contextManagement ?? null,
   }));
 }
 
@@ -93,6 +179,205 @@ function boundedText(value, label, max = 256) {
     fail(`${label} must be a non-empty string of at most ${max} characters`, "E_ADAPTER_ENVELOPE");
   }
   return value;
+}
+
+function allowedKeys(value, keys, label) {
+  for (const key of Object.keys(value)) {
+    if (!keys.includes(key)) fail(`${label} contains an unsupported field: ${key}`, "E_INVOCATION_CONTRACT");
+  }
+}
+
+function normalizeInvocationDeclaration(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label} must be an object`, "E_INVOCATION_CONTRACT");
+  const outcome = value.outcome;
+  if (!INVOCATION_OUTCOMES.has(outcome)) fail(`${label}.outcome is unsupported`, "E_INVOCATION_CONTRACT");
+  if (outcome === "not_applicable") {
+    allowedKeys(value, ["outcome", "capability"], label);
+    return { outcome, capability: boundedText(value.capability, `${label}.capability`, 128) };
+  }
+  if (outcome === "unverified") {
+    allowedKeys(value, ["outcome", "reason"], label);
+    return { outcome, reason: boundedText(value.reason ?? "unverified invocation setting", `${label}.reason`, 256) };
+  }
+  allowedKeys(value, ["outcome", "flag", "value", "form", "index"], label);
+  const flag = boundedText(value.flag, `${label}.flag`, 128);
+  if (!flag.startsWith("--")) fail(`${label}.flag must be a long option`, "E_INVOCATION_CONTRACT");
+  const form = value.form;
+  if (!INVOCATION_FORMS.has(form)) fail(`${label}.form is unsupported`, "E_INVOCATION_CONTRACT");
+  const normalized = { outcome, flag, form };
+  if (form === "presence") {
+    if (value.value !== undefined) fail(`${label}.presence cannot declare a value`, "E_INVOCATION_CONTRACT");
+  } else {
+    normalized.value = boundedText(value.value, `${label}.value`, 512);
+  }
+  if (value.index !== undefined && value.index !== null) {
+    if (!Number.isInteger(value.index) || value.index < 0 || value.index > 4095) fail(`${label}.index is out of bounds`, "E_INVOCATION_CONTRACT");
+    normalized.index = value.index;
+  } else {
+    normalized.index = null;
+  }
+  return normalized;
+}
+
+export function normalizeInvocationContract(value, { required = false } = {}) {
+  if (value === undefined || value === null) {
+    if (required) fail("adapter envelope requires a versioned invocationContract", "E_INVOCATION_CONTRACT");
+    return null;
+  }
+  if (typeof value !== "object" || Array.isArray(value)) fail("invocationContract must be an object", "E_INVOCATION_CONTRACT");
+  allowedKeys(value, ["schemaVersion", "version", "settings"], "invocationContract");
+  if (value.schemaVersion !== INVOCATION_CONTRACT_SCHEMA || value.version !== 1) fail(`invocationContract must use ${INVOCATION_CONTRACT_SCHEMA} version 1`, "E_INVOCATION_CONTRACT");
+  if (!value.settings || typeof value.settings !== "object" || Array.isArray(value.settings)) fail("invocationContract.settings must be an object", "E_INVOCATION_CONTRACT");
+  if (Object.keys(value.settings).length > INVOCATION_SETTINGS.size) fail("invocationContract.settings exceeds its bounded setting count", "E_INVOCATION_CONTRACT");
+  for (const key of Object.keys(value.settings)) {
+    if (!INVOCATION_SETTINGS.has(key)) fail(`invocationContract.settings contains an unsupported setting: ${key}`, "E_INVOCATION_CONTRACT");
+  }
+  const settings = {};
+  for (const key of Object.keys(value.settings).sort()) settings[key] = normalizeInvocationDeclaration(value.settings[key], `invocationContract.settings.${key}`);
+  return { schemaVersion: INVOCATION_CONTRACT_SCHEMA, version: 1, settings };
+}
+
+export function invocationContractDigest(value) {
+  const normalized = normalizeInvocationContract(value, { required: true });
+  return sha256Bytes(stableJson(normalized));
+}
+
+function capabilityForSetting(capabilities, key, expectedValue) {
+  const declared = capabilities?.[key];
+  if (declared === null) return { state: "not_transported", capability: null };
+  if (!declared || !declared.values || typeof declared.values !== "object") {
+    return { state: declared === undefined ? "unsupported" : "transported", capability: declared ?? null };
+  }
+  if (!Object.prototype.hasOwnProperty.call(declared.values, expectedValue)) {
+    return { state: "unsupported", capability: null };
+  }
+  return { state: "transported", capability: declared.values[expectedValue] ?? null };
+}
+
+export function validateAdapterProviderFamily({ adapterIdentifier, providerFamily } = {}) {
+  const capabilities = ADAPTER_CAPABILITIES[adapterIdentifier];
+  if (!capabilities) fail(`adapter capability is not mapped for invocation contract validation: ${adapterIdentifier}`, "E_INVOCATION_UNVERIFIED");
+  if (capabilities.providerFamily !== providerFamily) {
+    fail(`adapter ${adapterIdentifier} requires providerFamily ${capabilities.providerFamily}, received ${providerFamily}`, "E_INVOCATION_UNVERIFIED");
+  }
+  return capabilities;
+}
+
+function knownSettingFlags(key) {
+  return {
+    modelLabel: ["--model"],
+    effort: ["--effort"],
+    permissionProfile: ["--permission-profile", "--read-only", "--sandbox", "--permission-mode", "--dangerously-skip-permissions", "--lane"],
+    noCommit: ["--no-commit"],
+    autocompact: ["--autocompact"],
+  }[key] ?? [];
+}
+
+function argvOccurrences(args, flag, expectedForm = "separate") {
+  const terminator = args.indexOf("--");
+  const occurrences = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index];
+    if (argument === flag) {
+      occurrences.push({ index, form: expectedForm, value: expectedForm === "presence" ? null : (args[index + 1] === undefined || String(args[index + 1]).startsWith("--") ? null : args[index + 1]), postTerminator: terminator >= 0 && index > terminator });
+    } else if (argument.startsWith(`${flag}=`)) {
+      occurrences.push({ index, form: "equals", value: argument.slice(flag.length + 1), postTerminator: terminator >= 0 && index > terminator });
+    }
+  }
+  return { terminator, occurrences };
+}
+
+function validateInvocationDeclaration(args, key, declaration, capabilityState, expectedValue, { publicRole, adapterIdentifier, providerFamily } = {}) {
+  if (capabilityState?.state === "unsupported") {
+    fail(`${key} configured value is unsupported by the adapter capability mapping`, "E_INVOCATION_UNVERIFIED");
+  }
+  const capability = capabilityState?.capability ?? null;
+  if (declaration.outcome === "unverified") {
+    const isClaudeExecutorDefault = key === "permissionProfile"
+      && publicRole === "executor"
+      && adapterIdentifier === "claude-delegate"
+      && providerFamily === "claude"
+      && expectedValue === "workspace-write"
+      && capability?.adapterDefaultProfile === "acceptEdits";
+    if (!isClaudeExecutorDefault || declaration.reason !== CLAUDE_EXECUTOR_DEFAULT_REASON) {
+      fail(`${key} invocation setting is explicitly unverified without the mapped Claude Executor default evidence`, "E_INVOCATION_UNVERIFIED");
+    }
+    if (args.includes("--")) fail(`${key} adapter-default evidence cannot contain an option terminator`, "E_INVOCATION_CONTRACT");
+    for (const flag of capability.absentFlags) {
+      if (argvOccurrences(args, flag).occurrences.length > 0) fail(`${key} adapter-default evidence contains a permission/autonomy selector: ${flag}`, "E_INVOCATION_CONTRACT");
+    }
+    return {
+      outcome: "unverified",
+      setting: key,
+      reason: declaration.reason,
+      evidence: "adapter_default",
+      form: "default_absence",
+      profile: capability.adapterDefaultProfile,
+      absentFlags: [...capability.absentFlags],
+      limitation: CLAUDE_EXECUTOR_DEFAULT_LIMITATION,
+    };
+  }
+  if (declaration.outcome === "not_applicable") {
+    if (capabilityState?.state !== "not_transported" || declaration.capability !== "not_transported") fail(`${key} cannot be declared not_applicable for this adapter capability`, "E_INVOCATION_CONTRACT");
+    for (const flag of knownSettingFlags(key)) {
+      if (argvOccurrences(args, flag).occurrences.length > 0) fail(`${key} is declared not_applicable but its argv flag is present`, "E_INVOCATION_CONTRACT");
+    }
+    return { outcome: "not_applicable", setting: key };
+  }
+  if (!capability) fail(`${key} has no known transport capability for this adapter`, "E_INVOCATION_UNVERIFIED");
+  if (capability.adapterDefaultProfile) fail(`${key} must use the mapped adapter-default declaration for this adapter/profile`, "E_INVOCATION_CONTRACT");
+  if (!capability.forms.includes(declaration.form) || capability.flag !== declaration.flag) fail(`${key} invocation form or flag is not supported by this adapter capability`, "E_INVOCATION_CONTRACT");
+  if (declaration.form !== "presence" && declaration.value !== expectedValue) fail(`${key} invocation value does not match the confirmed role profile`, "E_INVOCATION_CONTRACT");
+  const { terminator, occurrences } = argvOccurrences(args, declaration.flag, declaration.form);
+  if (occurrences.length !== 1) fail(`${key} invocation declaration is missing, duplicated, or contradictory in argv`, "E_INVOCATION_CONTRACT");
+  const occurrence = occurrences[0];
+  if (capability.noTerminator && terminator >= 0) fail(`${key} invocation argv contains an unsupported option terminator`, "E_INVOCATION_CONTRACT");
+  if (occurrence.postTerminator) fail(`${key} invocation declaration appears after the argv terminator`, "E_INVOCATION_CONTRACT");
+  if (occurrence.form !== declaration.form || occurrence.value !== (declaration.form === "presence" ? null : declaration.value)) fail(`${key} invocation declaration does not match the actual argv`, "E_INVOCATION_CONTRACT");
+  if (declaration.index !== null && declaration.index !== occurrence.index) fail(`${key} invocation declaration index does not match the actual argv`, "E_INVOCATION_CONTRACT");
+  if (key === "permissionProfile") {
+    for (const flag of knownSettingFlags(key)) {
+      if (flag === declaration.flag) continue;
+      if (argvOccurrences(args, flag).occurrences.length > 0) fail(`permissionProfile argv contains an unsupported or contradictory selector: ${flag}`, "E_INVOCATION_CONTRACT");
+    }
+  }
+  return { outcome: "verified_requested", setting: key, flag: declaration.flag, form: declaration.form, index: occurrence.index };
+}
+
+function validateExactSessionContinuation(args, adapterIdentifier, expectedSession) {
+  if (expectedSession === null || expectedSession === undefined) return;
+  if (adapterIdentifier !== "claude-delegate" && adapterIdentifier !== "codex-delegate") return;
+  const { terminator, occurrences } = argvOccurrences(args, "--session", "separate");
+  if (terminator >= 0 || occurrences.length !== 1 || occurrences[0].form !== "separate" || occurrences[0].value !== expectedSession) {
+    fail(`${adapterIdentifier} exact-session continuation requires exactly one separated --session <id> matching the confirmed session`, "E_INVOCATION_CONTRACT");
+  }
+}
+
+export function validateInvocationContract({ contract, args, adapterIdentifier, publicRole, roleProfile } = {}) {
+  const normalized = normalizeInvocationContract(contract, { required: true });
+  if (!Array.isArray(args) || args.some((item) => typeof item !== "string")) fail("invocation contract validation requires a string argv", "E_INVOCATION_CONTRACT");
+  const capabilities = validateAdapterProviderFamily({ adapterIdentifier, providerFamily: roleProfile?.providerFamily });
+  const expectedKeys = ["modelLabel", "effort", "permissionProfile"];
+  if (publicRole === "executor") expectedKeys.push("noCommit");
+  if (publicRole === "planner-2" && roleProfile?.providerFamily === "claude") expectedKeys.push("autocompact");
+  const actualKeys = Object.keys(normalized.settings);
+  if (actualKeys.some((key) => !expectedKeys.includes(key)) || expectedKeys.some((key) => !actualKeys.includes(key))) fail("invocationContract settings do not exactly match the confirmed role requirements", "E_INVOCATION_CONTRACT");
+  const verified = {};
+  for (const key of expectedKeys) {
+    const expectedValue = key === "autocompact" ? "400k" : roleProfile?.[key];
+    const capability = capabilityForSetting(capabilities, key, expectedValue);
+    verified[key] = validateInvocationDeclaration(args, key, normalized.settings[key], capability, expectedValue, {
+      publicRole,
+      adapterIdentifier,
+      providerFamily: roleProfile?.providerFamily,
+    });
+  }
+  return {
+    contract: normalized,
+    digest: sha256Bytes(stableJson(normalized)),
+    verified,
+    limitation: INVOCATION_LIMITATION,
+  };
 }
 
 function consistentAlias(value, aliases, label) {
@@ -148,6 +433,8 @@ function normalizeAdapterEnvelopeShape(value, { adapter, args } = {}) {
     fail("adapter envelope cwdMode must be inherits_process or adapter_contract", "E_ADAPTER_ENVELOPE");
   }
   const adapterContractValue = value.adapterContract;
+  const invocationContract = normalizeInvocationContract(value.invocationContract);
+  const invocationContractDigest = invocationContract === null ? null : sha256Bytes(stableJson(invocationContract));
   if (cwdMode === "inherits_process") {
     if (adapterContractValue !== null) {
       fail("inherits_process adapter envelopes require adapterContract=null", "E_ADAPTER_ENVELOPE");
@@ -161,6 +448,8 @@ function normalizeAdapterEnvelopeShape(value, { adapter, args } = {}) {
       effectiveWorkingDirectory,
       cwdMode,
       adapterContract: null,
+      invocationContract,
+      invocationContractDigest,
     };
   }
 
@@ -203,12 +492,14 @@ function normalizeAdapterEnvelopeShape(value, { adapter, args } = {}) {
     schemaVersion: ADAPTER_ENVELOPE_SCHEMA,
     effectiveWorkingDirectory,
     cwdMode,
-    adapterContract: {
-      adapter: declaredAdapter,
-      cwdArgument,
-      cwdValue: normalizedCwdValue,
-    },
-  };
+      adapterContract: {
+        adapter: declaredAdapter,
+        cwdArgument,
+        cwdValue: normalizedCwdValue,
+      },
+      invocationContract,
+      invocationContractDigest,
+    };
 }
 
 function envelopeRecord(envelope, normalizedDigest, sourceFile, sourceFileDigest) {
@@ -251,6 +542,10 @@ async function inspectAdapterEnvelope(root, options) {
       fail("direct library adapter envelopes cannot claim a source-file digest", "E_ADAPTER_ENVELOPE");
     }
     const envelope = normalizeAdapterEnvelopeShape(raw, { adapter: options.adapter, args: options.args });
+    const invocation = options.roleProfile
+      ? validateInvocationContract({ contract: envelope.invocationContract, args: options.args, adapterIdentifier: options.adapterIdentifier, publicRole: options.publicRole ?? options.role, roleProfile: options.roleProfile })
+      : null;
+    if (options.roleProfile) validateExactSessionContinuation(options.args, options.adapterIdentifier, options.expectedSession ?? null);
     await assertNoReparseCrossing(root, envelope.effectiveWorkingDirectory, { allowMissing: false, includeFinal: true });
     const cwd = absoluteFromRelative(root, envelope.effectiveWorkingDirectory);
     const cwdStat = await fsp.lstat(cwd);
@@ -260,6 +555,7 @@ async function inspectAdapterEnvelope(root, options) {
       valid: true,
       envelope,
       normalizedDigest,
+      invocation,
       record: envelopeRecord(envelope, normalizedDigest, sourceFile, sourceFileDigest),
       sourceFile,
       sourceFileDigest,
@@ -436,6 +732,12 @@ function normalizeOptions(options) {
     adapterEnvelopeSourceFile: options.adapterEnvelopeSourceFile ?? null,
     adapterEnvelopeSourceDigest: options.adapterEnvelopeSourceDigest ?? null,
     adapterEnvelopeSourceError: options.adapterEnvelopeSourceError ?? null,
+    adapterIdentifier: options.adapterIdentifier ?? null,
+    providerFamily: options.providerFamily ?? null,
+    roleProfile: options.roleProfile ?? null,
+    publicRole: options.publicRole ?? null,
+    invocationContractDigest: options.invocationContractDigest ?? null,
+    contextManagement: options.contextManagement ?? null,
   };
 }
 
@@ -607,6 +909,7 @@ export class ProcessJobController {
         jobRelative,
         capsuleRelative,
         adapterEnvelopeDigest: existingEnvelope.normalizedDigest,
+        invocationContractDigest: existingEnvelope.invocation?.digest ?? existingEnvelope.envelope.invocationContractDigest ?? null,
       });
       const idempotencyKey = text(options.idempotencyKey ?? `dd:${existingIdentityHash}`, "idempotencyKey");
       const identityMismatches = [];
@@ -697,6 +1000,7 @@ export class ProcessJobController {
         capsulePath: capsuleRelative,
         requestedSessionId: options.expectedSession,
         suspensionStatus: "unknown",
+        contextManagement: options.contextManagement ?? null,
         adapterEnvelope: null,
         adapterEnvelopeValidation: { valid: false, code: envelope.code, reason: envelope.error },
         state: "STOPPED_INVALID_ENVELOPE",
@@ -736,6 +1040,7 @@ export class ProcessJobController {
       jobRelative,
       capsuleRelative,
       adapterEnvelopeDigest: envelope.normalizedDigest,
+      invocationContractDigest: envelope.invocation?.digest ?? envelope.envelope.invocationContractDigest ?? null,
     });
     const idempotencyKey = text(options.idempotencyKey ?? `dd:${identityHash}`, "idempotencyKey");
     const jobRecord = {
@@ -752,8 +1057,14 @@ export class ProcessJobController {
       capsulePath: capsuleRelative,
       requestedSessionId: options.expectedSession,
       suspensionStatus: suspension.suspensionStatus,
+      contextManagement: options.contextManagement ?? null,
+      adapterIdentifier: options.adapterIdentifier ?? null,
+      providerFamily: options.providerFamily ?? null,
+      roleProfile: options.roleProfile ?? null,
       adapterEnvelope: envelope.record,
       adapterEnvelopeDigest: envelope.normalizedDigest,
+      invocationContract: envelope.envelope.invocationContract ?? null,
+      invocationContractDigest: envelope.invocation?.digest ?? envelope.envelope.invocationContractDigest ?? null,
       state: suspension.shouldStop ? "STOPPED_UNAVAILABLE" : "DISPATCHING",
     };
     await writeNewFile(root, jobRelative, `${JSON.stringify(jobRecord, null, 2)}\n`);
@@ -855,11 +1166,25 @@ export class ProcessJobController {
       suspensionStatus: suspension.suspensionStatus,
       suspensionEvidence: { ...suspension.evidence, resultObservedBeforeProcessExit: Boolean(resultObservedAt), resultWatch: resultWatcher.unavailable ? "unavailable" : "filesystem-event" },
       hostTelemetry: suspension.hostTelemetry,
+      contextManagement: options.contextManagement ?? null,
+      adapterIdentifier: options.adapterIdentifier ?? null,
+      providerFamily: options.providerFamily ?? null,
+      roleProfile: options.roleProfile ?? null,
       rawArtifacts,
       changedPaths: options.changedPaths,
       gateCoverage: options.gateCoverage ?? {},
       adapterEnvelope: envelope.record,
       adapterEnvelopeDigest: envelope.normalizedDigest,
+      invocationContract: envelope.envelope.invocationContract ?? null,
+      invocationContractDigest: envelope.invocation?.digest ?? envelope.envelope.invocationContractDigest ?? null,
+      invocationEvidence: envelope.invocation ? {
+        meaning: deriveInvocationEvidenceMeaning(envelope.invocation.verified),
+        providerApplication: "unknown",
+        providerEnforcement: "unknown",
+        contractDigest: envelope.invocation.digest,
+        verified: envelope.invocation.verified,
+        limitation: INVOCATION_LIMITATION,
+      } : null,
       providerUsage: parsed?.usage,
       maxBytes: options.maxCapsuleBytes,
     });
